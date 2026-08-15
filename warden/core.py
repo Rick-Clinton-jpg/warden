@@ -14,6 +14,29 @@ from .matcher import dual_compare
 from .polling import get_strategy, PollingStrategy
 
 
+def format_result_line(result: dict, *, agent_id: Optional[str] = None) -> str:
+    """
+    Render a single check_once() result as a one-line status string,
+    expanding DIVERGENT results into their word/trigram rater breakdown.
+    Shared by run_loop (single-session) and run_daemon (multi-session) so
+    both surfaces display DIVERGENT results identically.
+    """
+    tag = result.get("tag", "?")
+    status = result.get("status") or "(none)"
+    prefix = f"[{result.get('timestamp', '')}] "
+    if agent_id is not None:
+        prefix += f"{agent_id:12} "
+
+    if tag == "DIVERGENT":
+        word_tag = result.get("word_tag", "?")
+        trigram_tag = result.get("trigram_tag", "?")
+        return (
+            f"{prefix}{tag:9} | word={word_tag} trigram={trigram_tag} | "
+            f"{status[:80]}"
+        )
+    return f"{prefix}{tag:9} | {status[:80]}"
+
+
 @dataclass
 class Session:
     agent_id: str
@@ -195,23 +218,44 @@ class Warden:
         try:
             while True:
                 result = self.check_once(agent_id)
-                tag = result["tag"]
-                status = result.get("status") or "(none)"
-                if tag == "DIVERGENT":
-                    word_tag = result.get("word_tag", "?")
-                    trigram_tag = result.get("trigram_tag", "?")
-                    print(
-                        f"[{result['timestamp']}] {tag:9} | "
-                        f"word={word_tag} trigram={trigram_tag} | "
-                        f"{status[:90]}"
-                    )
-                else:
-                    print(
-                        f"[{result['timestamp']}] {tag:9} | "
-                        f"{status[:90]}"
-                    )
+                print(format_result_line(result))
                 if once:
                     break
                 time.sleep(interval)
         except KeyboardInterrupt:
             print("\n[warden] Stopped.")
+
+    # ------------------------------------------------------------------
+    # Multi-session daemon
+    # ------------------------------------------------------------------
+    def _is_due(self, session: "Session", now: datetime) -> bool:
+        if not session.last_checked:
+            return True
+        try:
+            last = datetime.fromisoformat(session.last_checked)
+        except ValueError:
+            return True
+        return (now - last).total_seconds() >= session.interval_seconds
+
+    def run_daemon(self, tick_seconds: int = 30) -> None:
+        """
+        Single long-running process that checks every ACTIVE registered
+        session on its own --interval, sleeping `tick_seconds` between
+        scan passes. Reloads the registry each tick so sessions registered
+        from another terminal are picked up without restarting the daemon.
+        """
+        print(f"[warden] Daemon started. Tick={tick_seconds}s. Ctrl-C to stop.\n")
+        try:
+            while True:
+                self._load_registry()
+                active = self.list_sessions(active_only=True)
+                if not active:
+                    print("[warden] No active sessions yet — waiting...")
+                now = datetime.now().astimezone()
+                for session in active:
+                    if self._is_due(session, now):
+                        result = self.check_once(session.agent_id)
+                        print(format_result_line(result, agent_id=session.agent_id))
+                time.sleep(tick_seconds)
+        except KeyboardInterrupt:
+            print("\n[warden] Daemon stopped.")

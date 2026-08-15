@@ -78,8 +78,11 @@ def cli(ctx: click.Context, root: str) -> None:
 @click.option("--objective", required=True, help="Stated objective for this session")
 @click.option("--interval", default=600, show_default=True, help="Poll interval in seconds")
 @click.option("--transcript", default=None, help="Explicit path to session transcript / log")
-@click.option("--once", is_flag=True, help="Check once and exit (no loop)")
-@click.option("--background", is_flag=True, help="Register only; do not enter poll loop")
+@click.option("--once", is_flag=True, help="Register, run a single check, and exit")
+@click.option("--follow", is_flag=True,
+              help="Register, then block and poll this session on --interval until Ctrl-C")
+@click.option("--background", is_flag=True,
+              help="Deprecated: registration is the default now, this flag is a no-op")
 @click.pass_context
 def watch_cmd(
     ctx: click.Context,
@@ -89,9 +92,15 @@ def watch_cmd(
     interval: int,
     transcript: str | None,
     once: bool,
+    follow: bool,
     background: bool,
 ) -> None:
-    """Start monitoring a session against an objective."""
+    """Register a session for monitoring against an objective.
+
+    By default this only registers the session — use `warden daemon` to
+    actively check every registered session on its own interval, or
+    `--follow` to block and poll just this one session in the foreground.
+    """
     w: Warden = ctx.obj["warden"]
     session = w.watch(
         agent_id=session_id,
@@ -105,11 +114,25 @@ def watch_cmd(
     click.echo(f"         strategy  : {session.strategy_name}")
     click.echo(f"         interval  : {session.interval_seconds}s")
 
-    if background:
-        click.echo("[warden] Running in background registry mode. Use `warden status` / `warden check`.")
+    if once:
+        result = w.check_once(session_id)
+        click.echo(json.dumps(result, indent=2, ensure_ascii=False))
         return
 
-    w.run_loop(session_id, once=once)
+    if follow:
+        w.run_loop(session_id)
+        return
+
+    if background:
+        click.echo(
+            "[warden] Note: --background is deprecated — registration is the "
+            "default now. Use 'warden daemon' to actively monitor sessions."
+        )
+    else:
+        click.echo(
+            "[warden] Registered only. Use `warden daemon` to actively monitor, "
+            "or `warden check` for a one-shot poll."
+        )
 
 
 @cli.command("check")
@@ -243,6 +266,16 @@ def stop_cmd(ctx: click.Context, session_id: str) -> None:
         click.echo(f"[warden] Stopped monitoring '{session_id}'")
     else:
         click.echo(f"[warden] No active session named '{session_id}'")
+
+
+@cli.command("daemon")
+@click.option("--tick", "tick_seconds", default=30, show_default=True,
+              help="Seconds between scan passes across all sessions")
+@click.pass_context
+def daemon_cmd(ctx: click.Context, tick_seconds: int) -> None:
+    """Continuously check every active session on its own --interval, in one process."""
+    w: Warden = ctx.obj["warden"]
+    w.run_daemon(tick_seconds=tick_seconds)
 
 
 @cli.command("rule")

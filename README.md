@@ -48,7 +48,10 @@ Copy the `[WARDEN_RULE]` block into the agent's system prompt / context / CLAUDE
 WARDEN_STATUS: Setting up FastAPI routes for /score and /debug endpoints
 ```
 
-### 2. Start watching a session
+### 2. Register a session
+
+`warden watch` registers a session and objective, then exits — it does not
+block by default:
 
 ```bash
 # Claude Code (default)
@@ -63,12 +66,37 @@ warden watch \
   --session my-codex-run \
   --objective "Refactor auth middleware" \
   --transcript ~/.codex/sessions/2026/08/15/rollout-xyz.jsonl
-
-# Register only (no blocking loop)
-warden watch --session abc123 --objective "..." --background
 ```
 
-### 3. Check status
+`watch` flags:
+
+| Flag | Behavior |
+|------|----------|
+| *(none)* | Register and exit immediately. This is the default. |
+| `--once` | Register, run a single check, print the result, and exit. |
+| `--follow` | Register, then block in this terminal, polling this one session on its `--interval` until Ctrl-C. |
+| `--background` | Deprecated — identical to the default now. Prints a one-time note pointing at `warden daemon`. |
+
+### 3. Start the daemon
+
+Registering sessions doesn't watch them by itself — start the daemon in a
+terminal (or under `nohup`/a service manager) to actually check them:
+
+```bash
+warden watch --session abc123 --objective "..."
+warden watch --session my-codex-run --objective "..." --agent codex
+
+warden daemon                 # checks every active session on its own --interval
+warden daemon --tick 15       # scan every 15s for sessions that are due
+```
+
+The daemon reloads the session registry on every tick, so sessions
+registered from another terminal are picked up automatically — no restart
+needed. Each session is only re-checked once its own `--interval` has
+elapsed, so a session polled every 10 minutes and one polled every hour
+don't get checked in lockstep.
+
+### 4. Check status
 
 ```bash
 warden status          # all registered sessions
@@ -79,7 +107,7 @@ warden drifts --tag DIVERGENT     # cases the two raters disagreed on — needs 
 warden audit --session abc123 --since "1 hour ago"
 ```
 
-### 4. Stop
+### 5. Stop
 
 ```bash
 warden stop --session abc123
@@ -167,7 +195,7 @@ Audit records are newline-delimited JSON:
 ## Status
 
 - Design: complete (v0.1.1)
-- Implementation: working CLI + Claude Code / Codex file watchers + matcher + audit
+- Implementation: working CLI + multi-session daemon + Claude Code / Codex file watchers + dual-rater matcher + audit
 - Tests: matcher, audit, status extraction
 
 Built to be small, honest, and useful.
