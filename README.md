@@ -10,7 +10,7 @@ It only:
 
 1. Collects a single-line status the agent emits every N minutes  
 2. Compares that status to the original objective  
-3. Tags it `MATCH` / `DRIFT` / `UNCLEAR`  
+3. Tags it `MATCH` / `DRIFT` / `UNCLEAR` / `DIVERGENT`  
 4. Writes a short note to an append-only NDJSON audit trail  
 
 ---
@@ -75,6 +75,7 @@ warden status          # all registered sessions
 warden check           # one-shot poll of all active sessions
 warden check --session abc123
 warden drifts --today
+warden drifts --tag DIVERGENT     # cases the two raters disagreed on — needs a human
 warden audit --session abc123 --since "1 hour ago"
 ```
 
@@ -99,13 +100,27 @@ You can always pass `--transcript /path/to/file` to point at a specific log.
 
 ---
 
-## Matching (v1)
+## Matching (v1.1 — dual-rater)
 
-Simple keyword overlap (Jaccard) after stop-word removal and light stemming.
+Two structurally independent raters each vote MATCH / UNCLEAR / DRIFT, and WARDEN
+only commits to a tag when they agree:
 
-- `≥ 0.45` → **MATCH**
-- `≥ 0.18` → **UNCLEAR**
-- below    → **DRIFT**
+- **Rater A — word overlap.** Jaccard similarity over stemmed keywords, with
+  camelCase/PascalCase compounds split before comparison (`FastAPI` → `fast` + `api`)
+  so acronym-bearing tech terms overlap correctly with their expansions.
+  - `≥ 0.35` → MATCH · `≥ 0.15` → UNCLEAR · below → DRIFT
+- **Rater B — character trigrams.** Jaccard similarity over 3-character
+  substrings of the raw text. Catches morphological overlap word-stemming
+  misses, and misses things word-overlap catches — a different failure mode
+  by construction.
+  - `≥ 0.30` → MATCH · `≥ 0.12` → UNCLEAR · below → DRIFT
+
+When the two raters land on the same tag, that tag is logged. When they
+disagree, WARDEN logs **`DIVERGENT`** instead of picking a side — that
+disagreement is the signal that needs a human, not an algorithm to break the
+tie. Both raters' scores are always written to the audit record
+(`word_tag`/`word_score`/`trigram_tag`/`trigram_score`) so a divergent call
+can be inspected after the fact.
 
 This is intentionally crude and dependency-free. An embedding upgrade path is documented in the design spec for when false positives become annoying.
 
@@ -129,9 +144,12 @@ Audit records are newline-delimited JSON:
   "objective": "Build API wrapper for IntentGraph",
   "status": "Setting up FastAPI routes for /score and /debug endpoints",
   "tag": "MATCH",
-  "note": "Status aligns with objective (score=0.52). On track.",
+  "note": "Status aligns with objective (score=0.36). On track.",
   "action": "NONE",
-  "score": 0.52
+  "word_tag": "MATCH",
+  "word_score": 0.36,
+  "trigram_tag": "MATCH",
+  "trigram_score": 0.41
 }
 ```
 

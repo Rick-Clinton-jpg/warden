@@ -10,11 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from .audit import AuditLogger
-from .matcher import (
-    compare_status_to_objective,
-    make_note,
-    similarity_score,
-)
+from .matcher import dual_compare
 from .polling import get_strategy, PollingStrategy
 
 
@@ -32,6 +28,8 @@ class Session:
     last_checked: Optional[str] = None
     last_status: Optional[str] = None
     last_tag: Optional[str] = None
+    last_word_tag: Optional[str] = None
+    last_trigram_tag: Optional[str] = None
     active: bool = True
 
 
@@ -130,31 +128,37 @@ class Warden:
         strategy = self._get_strategy(session)
         status = strategy.poll(session.agent_id)
 
-        tag = compare_status_to_objective(status or "", session.objective)
-        score = similarity_score(status or "", session.objective)
-        note = make_note(tag, status or "", session.objective, score)
+        result = dual_compare(status or "", session.objective)
 
         self.audit.log(
             agent_id=session.agent_id,
             objective=session.objective,
             status=status or "",
-            tag=tag,
-            note=note,
-            extra={"score": round(score, 3)},
+            tag=result.final_tag,
+            note=result.note,
+            extra={
+                "word_tag": result.word_tag,
+                "word_score": round(result.word_score, 3),
+                "trigram_tag": result.trigram_tag,
+                "trigram_score": round(result.trigram_score, 3),
+            },
         )
 
         session.last_checked = datetime.now().astimezone().isoformat(timespec="seconds")
         session.last_status = status
-        session.last_tag = tag
+        session.last_tag = result.final_tag
+        session.last_word_tag = result.word_tag
+        session.last_trigram_tag = result.trigram_tag
         self._save_registry()
 
         return {
             "agent_id": session.agent_id,
             "objective": session.objective,
             "status": status,
-            "tag": tag,
-            "score": round(score, 3),
-            "note": note,
+            "tag": result.final_tag,
+            "word_tag": result.word_tag,
+            "trigram_tag": result.trigram_tag,
+            "note": result.note,
             "timestamp": session.last_checked,
         }
 
@@ -193,10 +197,19 @@ class Warden:
                 result = self.check_once(agent_id)
                 tag = result["tag"]
                 status = result.get("status") or "(none)"
-                print(
-                    f"[{result['timestamp']}] {tag:7} | "
-                    f"{status[:90]}"
-                )
+                if tag == "DIVERGENT":
+                    word_tag = result.get("word_tag", "?")
+                    trigram_tag = result.get("trigram_tag", "?")
+                    print(
+                        f"[{result['timestamp']}] {tag:9} | "
+                        f"word={word_tag} trigram={trigram_tag} | "
+                        f"{status[:90]}"
+                    )
+                else:
+                    print(
+                        f"[{result['timestamp']}] {tag:9} | "
+                        f"{status[:90]}"
+                    )
                 if once:
                     break
                 time.sleep(interval)

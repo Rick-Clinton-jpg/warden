@@ -2,14 +2,19 @@
 
 from warden.matcher import (
     compare_status_to_objective,
+    compare_trigram,
+    dual_compare,
     extract_keywords,
     similarity_score,
+    trigram_score,
 )
 
 
 def test_extract_keywords_basic():
     kws = extract_keywords("Setting up FastAPI routes for score endpoints")
-    assert "fastapi" in kws or "fastapi" in [k.lower() for k in kws]
+    # "FastAPI" now correctly splits into "fast" + "api" instead of staying fused
+    assert "fast" in kws
+    assert "api" in kws
     assert "route" in kws or "routes" in kws or any("rout" in k for k in kws)
     assert "the" not in kws
     assert "for" not in kws
@@ -40,3 +45,38 @@ def test_identical():
     text = "Implement authentication middleware for the API"
     assert compare_status_to_objective(text, text) == "MATCH"
     assert similarity_score(text, text) == 1.0
+
+
+def test_dual_compare_agreement_match():
+    status = "Setting up FastAPI routes for /score and /debug endpoints"
+    objective = "Build API wrapper for IntentGraph with /score and /debug endpoints"
+    r = dual_compare(status, objective)
+    assert r.word_tag == "MATCH"
+    assert r.trigram_tag == "MATCH"
+    assert r.final_tag == "MATCH"
+
+
+def test_dual_compare_agreement_drift():
+    status = "Refactoring test suite for edge cases in scorer.py"
+    objective = "Build API wrapper for IntentGraph with /score and /debug endpoints"
+    r = dual_compare(status, objective)
+    assert r.final_tag == "DRIFT"
+
+
+def test_dual_compare_divergent():
+    # Word-overlap and trigram overlap disagree on this pair by construction —
+    # this is the case the dual-rater design exists to catch.
+    status = "Implementing the scoring and debugging endpoints"
+    objective = "Build API wrapper for IntentGraph with /score and /debug endpoints"
+    r = dual_compare(status, objective)
+    assert r.word_tag != r.trigram_tag
+    assert r.final_tag == "DIVERGENT"
+    assert "disagree" in r.note.lower()
+
+
+def test_dual_compare_identical():
+    text = "Implement authentication middleware for the API"
+    r = dual_compare(text, text)
+    assert r.final_tag == "MATCH"
+    assert r.word_score == 1.0
+    assert r.trigram_score == 1.0

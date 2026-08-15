@@ -147,9 +147,15 @@ def status_cmd(ctx: click.Context) -> None:
         click.echo(f"• {s.agent_id}  [{flag}]  ({s.agent_type})")
         click.echo(f"  objective : {s.objective[:70]}")
         if s.last_checked:
-            click.echo(
-                f"  last      : {s.last_tag or '?'} @ {s.last_checked}"
-            )
+            if s.last_tag == "DIVERGENT":
+                click.echo(
+                    f"  last      : DIVERGENT | word={s.last_word_tag or '?'} "
+                    f"trigram={s.last_trigram_tag or '?'} @ {s.last_checked}"
+                )
+            else:
+                click.echo(
+                    f"  last      : {s.last_tag or '?'} @ {s.last_checked}"
+                )
             if s.last_status:
                 click.echo(f"  status    : {s.last_status[:70]}")
         click.echo("")
@@ -196,25 +202,28 @@ def audit_cmd(
 @cli.command("drifts")
 @click.option("--today", is_flag=True, help="Only today's records")
 @click.option("--session", default=None)
+@click.option("--tag", "tag", default="DRIFT", show_default=True,
+              help="Tag to filter by (DRIFT, DIVERGENT, UNCLEAR, MATCH)")
 @click.option("--limit", default=50, show_default=True)
 @click.pass_context
 def drifts_cmd(
     ctx: click.Context,
     today: bool,
     session: str | None,
+    tag: str,
     limit: int,
 ) -> None:
-    """List DRIFT events."""
+    """List DRIFT (or other tagged) events."""
     w: Warden = ctx.obj["warden"]
     since = None
     if today:
         since = datetime.now().astimezone().replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-    records = w.audit.read(session=session, tag="DRIFT", since=since, limit=limit)
+    records = w.audit.read(session=session, tag=tag, since=since, limit=limit)
 
     if not records:
-        click.echo("No drift events found.")
+        click.echo(f"No {tag} events found.")
         return
 
     for r in records:
