@@ -4,6 +4,8 @@
 
 Version 0.1.1
 
+> **ON HOLD — prototype stage, not production-ready.** Core detector found to have a fundamental scoring flaw; see [Known Issues / Limitations](#known-issues--limitations) below.
+
 Warden is an external observer for long-running AI coding agents (Claude Code, Codex, and others).  
 It does **not** control, rewrite, or interrupt the agent.  
 It only:
@@ -20,6 +22,38 @@ It only:
 > Observe only. Never intervene.
 
 This is the product's identity.
+
+---
+
+## Known Issues / Limitations
+
+**The core matcher is not just weak — it's inverted.** On a 60-pair
+hand-labelled test set, the primary matcher (Rater A, word-Jaccard) scores
+**AUC = 0.332** — below the 0.50 random baseline. That means its score is
+anti-correlated with ground truth, not merely noisy. No threshold recovers
+this: the best achievable accuracy across the full threshold sweep is 50%,
+identical to a rule that always answers MATCH.
+
+**Root cause.** The scorer measures vocabulary overlap, not directional
+alignment. Reversing or deleting the objective's work can score as high or
+higher than doing the correct work in different words. Example, against the
+same objective: "Deleting the /score and /debug endpoints" scored MATCH,
+while "Wiring up FastAPI routers for the two handlers" scored DRIFT.
+
+**The dual-rater system is not independent.** Word-Jaccard and
+trigram-Jaccard scores correlate at Pearson r = 0.934. Agreement between the
+two raters is not corroboration, and their disagreement (the `DIVERGENT` tag)
+is mostly threshold noise on a shared signal, not two independent checks
+catching different failure modes.
+
+**Status freshness is unverified.** On real transcripts, the last-read
+status line the matcher scores against can be up to 33.8 hours stale
+(median) and still get reported as current — WARDEN has no mechanism to
+detect or flag a stale status.
+
+None of this is fixed yet. Do not use WARDEN's tag as a signal of whether an
+agent is on task: at present it is not reliably better than chance, and in
+the AUC-below-0.5 sense, worse.
 
 ---
 
@@ -130,23 +164,27 @@ You can always pass `--transcript /path/to/file` to point at a specific log.
 
 ## Matching (v1.1 — dual-rater)
 
-Two structurally independent raters each vote MATCH / UNCLEAR / DRIFT, and WARDEN
-only commits to a tag when they agree:
+Two raters each vote MATCH / UNCLEAR / DRIFT, and WARDEN only commits to a
+tag when they agree. **They are not statistically independent** — see
+[Known Issues / Limitations](#known-issues--limitations) — so treat
+agreement as agreement, not corroboration:
 
 - **Rater A — word overlap.** Jaccard similarity over stemmed keywords, with
   camelCase/PascalCase compounds split before comparison (`FastAPI` → `fast` + `api`)
   so acronym-bearing tech terms overlap correctly with their expansions.
   - `≥ 0.35` → MATCH · `≥ 0.15` → UNCLEAR · below → DRIFT
 - **Rater B — character trigrams.** Jaccard similarity over 3-character
-  substrings of the raw text. Catches morphological overlap word-stemming
-  misses, and misses things word-overlap catches — a different failure mode
-  by construction.
+  substrings of the raw text. Correlates with Rater A at Pearson r = 0.934 —
+  a related measurement of the same underlying overlap, not an independent
+  check.
   - `≥ 0.30` → MATCH · `≥ 0.12` → UNCLEAR · below → DRIFT
 
 When the two raters land on the same tag, that tag is logged. When they
-disagree, WARDEN logs **`DIVERGENT`** instead of picking a side — that
-disagreement is the signal that needs a human, not an algorithm to break the
-tie. Both raters' scores are always written to the audit record
+disagree, WARDEN logs **`DIVERGENT`** instead of picking a side. Given how
+correlated the raters are, most `DIVERGENT` calls are two thresholds
+splitting the same underlying score, not two independent assessments in
+real disagreement — treat it as a weak signal, not a reliable one. Both
+raters' scores are always written to the audit record
 (`word_tag`/`word_score`/`trigram_tag`/`trigram_score`) so a divergent call
 can be inspected after the fact.
 
@@ -194,8 +232,8 @@ Audit records are newline-delimited JSON:
 
 ## Status
 
-- Design: complete (v0.1.1)
-- Implementation: working CLI + multi-session daemon + Claude Code / Codex file watchers + dual-rater matcher + audit
-- Tests: matcher, audit, status extraction
+- Design: prototype (v0.1.1) — core detector under redesign, see [Known Issues / Limitations](#known-issues--limitations)
+- Implementation: working CLI + multi-session daemon + Claude Code / Codex file watchers + audit trail; dual-rater matcher runs, but its scoring is not trustworthy (see Known Issues)
+- Tests: matcher, audit, status extraction — cover that the code runs, not that its scoring is correct
 
-Built to be small, honest, and useful.
+Built to be small, honest, and useful. Right now it's small and honest about its own flaw; not yet useful for its stated purpose.
