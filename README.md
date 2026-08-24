@@ -237,3 +237,9 @@ Audit records are newline-delimited JSON:
 - Tests: matcher, audit, status extraction — cover that the code runs, not that its scoring is correct
 
 Built to be small, honest, and useful. Right now it's small and honest about its own flaw; not yet useful for its stated purpose.
+
+## License
+Licensed under PolyForm Noncommercial 1.0.0 — free to use, including
+personal and research use. Commercial use requires a separate license.
+See [LICENSE](./LICENSE) for full terms, or reach out to discuss
+commercial licensing.
