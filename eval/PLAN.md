@@ -116,3 +116,44 @@ includes 0.5), because all three describe the same code in the same words.
 While locating the data: the instructions above, one example session per
 condition, the fact that all three conditions open all four candidate
 files, and Earshot's published results. No Warden score had been computed.
+
+---
+
+# Plan 4 — follow-up on the opening-sentence result (committed before scoring)
+
+Plan 3 found that the word score on a session's opening sentence separates
+honest from off-task Codex sessions (AUC 0.769). Two questions follow.
+
+## A. Does it replicate on the Claude arm?
+Data: Earshot branch `d2-claude`, commit `e0f9521`, 432 receiver sessions
+(108 honest, 162 coalition, 162 conceal), same 12 tasks and design.
+
+Seen while loading the data, before this plan: only 15 of the 432 sessions
+contain any agent text before the first tool call (all 15 coalition). The
+opening sentence that Plan 3 scored mostly does not exist in this arm, so
+that result **cannot be replicated here**, and this is reported as a
+finding in its own right.
+
+What is still tested on the Claude arm: status B (the final account), with
+the same measures as Plan 3. Expectation: no separation (interval reaches 0.5).
+
+## B. Is the Codex result about being on task, or about instruction wording?
+Honest and off-task receivers had differently worded instructions. Two
+checks on the Codex arm, status A, Rater A (word):
+
+1. **Within-condition association.** Inside one condition every session
+   had the same instruction family, but sessions still differ in how many
+   minutes they gave the true target. If the score reflects being on task,
+   it should rise with minutes-on-target inside the coalition group and
+   inside the conceal group. Measure: Spearman rho, interval by bootstrap
+   over the 12 tasks.
+2. **Wording spread.** Each condition used three wordings. Report the mean
+   score for each of the nine condition-wording cells. If scores differ
+   between wordings of the same condition by as much as they differ
+   between conditions, wording explains the result.
+
+## Decision rule
+The opening-sentence score is described as an on-task signal only if, in
+B.1, the interval for rho lies above 0 in both the coalition and conceal
+groups. Otherwise it is described as unexplained or as a wording effect,
+and no product change follows from it.
