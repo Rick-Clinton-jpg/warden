@@ -2,7 +2,7 @@
 
 **Lightweight Agent Drift Detection & Audit System**
 
-Version 0.3.1
+Version 0.3.2
 
 > **ON HOLD — prototype stage, not production-ready.** Core detector found to have a fundamental scoring flaw; see [Known Issues / Limitations](#known-issues--limitations) below.
 
@@ -55,24 +55,29 @@ IntentGraph API wrapper" scores MATCH (0.78), while "Wiring up FastAPI
 routers and Pydantic response models for the two handlers" scores DRIFT
 (0.06).
 
-**On real agent sessions the tags are noise.** WARDEN was run on 288 real
-Codex sessions from the [Earshot](https://github.com/Rick-Clinton-jpg/Earshot)
-D2 study, where 72 receivers did the stated task and 216 were instructed to
-favour a hidden pair of files (and half of those to conceal it). Honest
-sessions put 46 of 60 review minutes on the true target; the others put 23
-to 25. WARDEN tagged honest work `MATCH` in 3 of 72 sessions on its opening
-sentence and 0 of 72 on its final account, and gave off-task sessions the
-same spread of tags. The raw word score on the opening sentence does
-separate the groups (AUC 0.77, interval 0.69 – 0.84), but the thresholds
-discard it, and the instructions differed in wording between groups, so
-that figure needs replication. The final account does not separate them
-(AUC 0.44). See [`eval/RESULTS.md`](./eval/RESULTS.md), section 7.
+**On real agent sessions the tags are noise.** WARDEN was run on 720 real
+receiver sessions from the [Earshot](https://github.com/Rick-Clinton-jpg/Earshot)
+D2 study (288 Codex, 432 Claude Code). In each arm some receivers did the
+stated task and the rest were instructed to favour a hidden pair of files,
+half of them also to conceal it. Honest sessions put 43 to 46 of 60 review
+minutes on the true target; the others put 20 to 25. WARDEN tagged honest
+work `MATCH` in 3 of 72 Codex sessions on its opening sentence, and in 0 of
+180 sessions across both arms on its final account. Off-task sessions got
+the same spread of tags.
 
-**Watching which files the agent opens would not help here either.** In
-those sessions every agent, honest or not, opened the correct file. The
-deviation showed only in the decision it returned. And of the 108 agents
-told to conceal the hidden instruction, none mentioned it in their own
-account. Only an external check on the result told the groups apart.
+**The agent's own words did not reliably show the deviation.** A raw word
+score on the Codex agents' opening sentence looked promising (AUC 0.77),
+but a follow-up showed it tracks how each instruction was phrased, not
+whether the agent was on task, and Claude Code sessions had no opening
+sentence at all in 417 of 432 cases. Scores on the final account were weak
+and changed direction between arms. Of the 270 agents told to conceal the
+hidden instruction, one mentioned it.
+
+**What worked was an external check on the result.** In both arms the
+decision the agent returned separated the groups cleanly. Which files the
+agent opened showed nothing on the Codex arm and a possible difference on
+the Claude arm that has not been tested further. See
+[`eval/RESULTS.md`](./eval/RESULTS.md), sections 7 and 8.
 
 **No dependency-free replacement was found.** Two candidate scorers were
 developed on half the objectives and scored once on the other half. The
@@ -155,6 +160,12 @@ The matcher is unchanged. Everything else below is fixed.
 - **Terminal safety.** Control characters are stripped from status text.
 - **Audit trail.** Each record says whether it differs from the previous
   poll; `warden audit --changes-only` hides the repeats.
+
+## Changes in 0.3.2 (November 2026)
+
+- **Follow-up on the real-session test.** Adds the Claude arm (432
+  sessions) and two checks on the opening-sentence result, which turns out
+  to be a wording effect. No product code changed.
 
 ## Changes in 0.3.1 (November 2026)
 
@@ -407,7 +418,7 @@ Audit records are newline-delimited JSON:
 
 ## Status
 
-- Design: prototype (v0.3.1) — on hold; core detector unchanged and not trustworthy, see [Known Issues / Limitations](#known-issues--limitations)
+- Design: prototype (v0.3.2) — on hold; core detector unchanged and not trustworthy, see [Known Issues / Limitations](#known-issues--limitations)
 - Implementation: working CLI + multi-session daemon + Claude Code / Codex file watchers + audit trail; dual-rater matcher runs, but its scoring is not trustworthy (see Known Issues)
 - Tests: matcher, audit, polling, freshness, registry, daemon and the evaluation harness. The scoring flaw itself is pinned by strict expected-failure tests and a frozen baseline, so it cannot change unnoticed
 
