@@ -69,6 +69,7 @@ def test_empty_inputs():
 
 
 def _warden(tmp_path: Path, status: str, **kw) -> dict:
+    kw.setdefault("reversal_check", True)
     t = tmp_path / "s.log"
     t.write_text(f"WARDEN_STATUS: {status}\n")
     w = Warden(root=tmp_path / ".warden")
@@ -94,9 +95,21 @@ def test_on_task_status_is_unaffected(tmp_path: Path):
     assert result["tag"] == "MATCH" and result["_audit"]["reversal"] is False
 
 
-def test_reversal_check_can_be_switched_off(tmp_path: Path):
-    result = _warden(
-        tmp_path, "Deleting the /score and /debug endpoints from the IntentGraph API wrapper",
-        reversal_check=False,
-    )
-    assert result["tag"] == "MATCH" and result["_audit"]["reversal"] is False
+def test_reversal_check_is_off_by_default(tmp_path: Path):
+    t = tmp_path / "s.log"
+    t.write_text("WARDEN_STATUS: Deleting the /score and /debug endpoints from the IntentGraph API wrapper\n")
+    w = Warden(root=tmp_path / ".warden")
+    w.watch(agent_id="a", objective=BUILD, transcript_path=str(t))
+    assert w.list_sessions()[0].reversal_check is False
+    assert w.check_once("a")["tag"] == "MATCH"
+    assert w.audit.read(session="a")[0]["reversal"] is False
+
+
+def test_known_false_flag_on_task_cleanup_is_flagged():
+    # Measured weakness (eval/RESULTS.md, section 6): removing something ELSE
+    # in service of the objective is flagged, because the check reads the
+    # verb, not what the verb acts on.
+    assert check_reversal(
+        "Removing duplicate log lines so audit logging records each admin action once",
+        "Add audit logging for all admin actions",
+    ).reversal

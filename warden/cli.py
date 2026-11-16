@@ -85,9 +85,10 @@ def cli(ctx: click.Context, root: str) -> None:
 @click.option("--stale-after", "stale_after", default=DEFAULT_STALE_AFTER_SECONDS,
               show_default=True,
               help="Seconds after which a status is tagged STALE and not scored")
-@click.option("--reversal-check/--no-reversal-check", "reversal_check", default=True,
+@click.option("--reversal-check/--no-reversal-check", "reversal_check", default=False,
               show_default=True,
-              help="Tag a status that describes undoing the objective as REVERSAL")
+              help="Experimental: tag a status that describes undoing the objective "
+                   "as REVERSAL. Off by default; it also flags on-task clean-up work.")
 @click.option("--once", is_flag=True, help="Register, run a single check, and exit")
 @click.option("--follow", is_flag=True,
               help="Register, then block and poll this session on --interval until Ctrl-C")

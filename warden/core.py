@@ -76,7 +76,9 @@ class Session:
     last_freshness: Optional[str] = None
     last_status_age_seconds: Optional[float] = None
     # Tag a status that describes undoing the objective as REVERSAL.
-    reversal_check: bool = True
+    # Off by default: on the mutation test set it flagged 30% of statuses
+    # that were not reversals (eval/RESULTS.md, section 6).
+    reversal_check: bool = False
 
 
 class RegistryError(RuntimeError):
@@ -186,7 +188,7 @@ class Warden:
         interval_seconds: int = 600,
         transcript_path: Optional[str] = None,
         stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
-        reversal_check: bool = True,
+        reversal_check: bool = False,
     ) -> Session:
         """Register a session for monitoring."""
         session = Session(
