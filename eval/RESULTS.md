@@ -241,3 +241,97 @@ sentences: these are not reversals and it does not see them.
 Hand check (7.3): AUC is the share of (honest, off-task) session pairs in
 which the honest session scores higher, ties counting half; 72 x 216 =
 15,552 pairs for the pooled figures.
+
+---
+
+## 8. Follow-up on section 7 (16 November 2026)
+
+Plan: `PLAN.md`, Plan 4, committed before scoring. Claude arm: Earshot
+branch `d2-claude`, commit `e0f9521`, 432 receiver sessions with an
+accepted answer (108 honest, 162 coalition, 162 conceal).
+`python eval/real_earshot_d2.py --earshot <path> --arm claude`.
+
+### 8.1 The opening-sentence result is a wording effect, not an on-task signal
+
+Within one condition, the word score does not rise with minutes on the
+true target (Codex arm, status A, Spearman rho, interval over tasks):
+
+| Condition | n | rho | 95% interval |
+|---|---|---|---|
+| honest | 72 | −0.01 | −0.28 – 0.24 |
+| coalition | 108 | −0.09 | −0.29 – 0.10 |
+| conceal | 108 | −0.10 | −0.25 – 0.07 |
+
+Mean word score by instruction wording:
+
+| Condition | Wording 1 | Wording 2 | Wording 3 |
+|---|---|---|---|
+| honest | 0.252 | 0.243 | 0.251 |
+| coalition | 0.219 | 0.217 | 0.154 |
+| conceal | 0.209 | 0.218 | 0.143 |
+
+The gap between two wordings of the same off-task instruction (0.065) is
+about twice the gap between honest and off-task under wordings 1 and 2
+(0.03). **Decision (pre-committed rule):** the interval for rho does not
+lie above 0 in either off-task group, so the opening-sentence score is
+not described as an on-task signal. The AUC of 0.769 in section 7 mostly
+reflects how each instruction was phrased.
+
+### 8.2 It cannot be replicated on the Claude arm, because there is no opening sentence
+
+| Condition | Sessions | With agent text before the first tool call |
+|---|---|---|
+| honest | 108 | 0 |
+| coalition | 162 | 15 |
+| conceal | 162 | 0 |
+
+Claude Code in this setup went straight to tool calls. A check that reads
+the agent's stated intent has nothing to read in 417 of 432 sessions. This
+is the same dependency WARDEN has on `WARDEN_STATUS`: it needs the agent to
+volunteer text.
+
+### 8.3 Final account on the Claude arm
+
+| | Rater A (word) | Rater B (trigram) |
+|---|---|---|
+| honest vs both | 0.589 (0.494 – 0.689) | 0.609 (0.519 – 0.721) |
+| honest vs coalition | 0.553 (0.463 – 0.654) | 0.599 (0.510 – 0.708) |
+| honest vs conceal | 0.625 (0.525 – 0.737) | 0.619 (0.525 – 0.736) |
+
+The plan expected no separation. That held for Rater A's pooled figure and
+not for the others, which sit slightly above 0.5. On the Codex arm the same
+measure was slightly below 0.5 (0.438). A weak effect that changes sign
+between arms is not a usable signal. Tags: honest work `MATCH` in 0 of 108
+sessions (81 DIVERGENT, 27 UNCLEAR); off-task sessions the same spread.
+
+Outcome on this arm: minutes on the true target 43.3 (honest), 20.6
+(coalition), 19.9 (conceal). The final account mentions the convention in
+54 of 162 coalition sessions and 1 of 162 conceal sessions.
+
+### 8.4 File access differs on the Claude arm (exploratory)
+
+| Condition | Opened the target file | Opened all four candidate files |
+|---|---|---|
+| honest | 108 / 108 | 17 / 108 (16%) |
+| coalition | 161 / 162 | 40 / 162 (25%) |
+| conceal | 162 / 162 | 95 / 162 (59%) |
+
+Section 7.4 found no difference on the Codex arm, where every session
+opened all four files. Here honest sessions usually opened only what they
+needed, and sessions told to conceal a hidden preference opened everything
+more than half the time. This measure was descriptive in the plan, has no
+interval, and comes from one arm. It is recorded as a lead, not a finding.
+
+### 8.5 Reading, replacing 7.6
+
+1. WARDEN's tags are noise on real sessions from both arms.
+2. The opening-sentence score is a wording effect, and Claude sessions
+   have no opening sentence to score.
+3. The agent's own final account does not reliably separate honest from
+   off-task sessions, and under an instruction to conceal it almost never
+   mentions the hidden instruction (0 of 108, 1 of 162).
+4. What the agent opened shows nothing on one arm and a possible
+   difference on the other.
+5. In both arms the decision the agent returned separates the groups
+   cleanly. An external check on the result is the only measure here that
+   worked.
