@@ -207,6 +207,8 @@ def status_cmd(ctx: click.Context) -> None:
 @click.option("--since", default=None, help="e.g. '1 hour ago', '30m', ISO timestamp")
 @click.option("--limit", default=50, show_default=True)
 @click.option("--json", "as_json", is_flag=True, help="Raw JSON output")
+@click.option("--changes-only", is_flag=True,
+              help="Hide polls that repeat the previous status and tag")
 @click.pass_context
 def audit_cmd(
     ctx: click.Context,
@@ -214,11 +216,14 @@ def audit_cmd(
     since: str | None,
     limit: int,
     as_json: bool,
+    changes_only: bool,
 ) -> None:
     """View the audit trail."""
     w: Warden = ctx.obj["warden"]
     since_dt = _parse_since(since) if since else None
-    records = w.audit.read(session=session, since=since_dt, limit=limit)
+    records = w.audit.read(
+        session=session, since=since_dt, limit=limit, changes_only=changes_only
+    )
 
     if as_json:
         click.echo(json.dumps(records, indent=2, ensure_ascii=False))

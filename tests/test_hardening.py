@@ -158,3 +158,42 @@ def test_control_characters_are_stripped_from_status(tmp_path: Path):
 
 def test_status_length_is_capped():
     assert len(sanitize_status("x" * 5000)) == 500
+
+
+# ---- Codex rollout format (records wrap the message in "payload")
+def test_codex_rollout_assistant_message_is_read_with_its_timestamp(tmp_path: Path):
+    t = tmp_path / "rollout-2026-11-16T10-00-00-abc.jsonl"
+    records = [
+        {"timestamp": "2026-11-16T10:00:00.000Z", "type": "session_meta", "payload": {"id": "abc"}},
+        {"timestamp": "2026-11-16T10:00:01.000Z", "type": "response_item",
+         "payload": {"type": "message", "role": "developer",
+                     "content": [{"type": "input_text", "text": "WARDEN_STATUS: from the system prompt"}]}},
+        {"timestamp": "2026-11-16T10:05:00.000Z", "type": "response_item",
+         "payload": {"type": "message", "role": "assistant",
+                     "content": [{"type": "output_text", "text": "WARDEN_STATUS: refactoring auth"}]}},
+        {"timestamp": "2026-11-16T10:06:00.000Z", "type": "response_item",
+         "payload": {"type": "message", "role": "user",
+                     "content": [{"type": "input_text", "text": "WARDEN_STATUS: typed by the user"}]}},
+        {"timestamp": "2026-11-16T10:07:00.000Z", "type": "response_item",
+         "payload": {"type": "function_call_output", "call_id": "c1",
+                     "output": "WARDEN_STATUS: printed by a tool"}},
+    ]
+    t.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+    reading = FileWatcherStrategy(agent_type="codex", transcript_path=str(t)).read("abc")
+    assert reading.text == "refactoring auth"
+    assert reading.observed_at.isoformat() == "2026-11-16T10:05:00+00:00"
+
+
+# ---- audit trail
+def test_repeat_polls_are_marked_unchanged_and_can_be_hidden(tmp_path: Path):
+    t = tmp_path / "s.log"
+    t.write_text("WARDEN_STATUS: doing the thing\n")
+    w = Warden(root=tmp_path / ".warden")
+    w.watch(agent_id="a", objective="do the thing", transcript_path=str(t))
+    for _ in range(3):
+        w.check_once("a")
+    t.write_text("WARDEN_STATUS: doing a different thing entirely\n")
+    w.check_once("a")
+
+    assert [r["changed"] for r in reversed(w.audit.read(session="a"))] == [True, False, False, True]
+    assert len(w.audit.read(session="a", changes_only=True)) == 2

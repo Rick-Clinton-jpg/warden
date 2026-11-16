@@ -280,6 +280,10 @@ class Warden:
                 **freshness_extra,
             }
 
+        # False when this poll saw the same status and reached the same tag
+        # as the previous one, so repeats can be filtered out of the trail.
+        extra["changed"] = (status, final_tag) != (session.last_status, session.last_tag)
+
         self.audit.log(
             agent_id=session.agent_id,
             objective=session.objective,
@@ -295,6 +299,7 @@ class Warden:
             if existing is None:      # removed by another process meanwhile
                 return None
             existing.last_checked = checked_at
+            session.last_status, session.last_tag = status, final_tag
             existing.last_status = status
             existing.last_tag = final_tag
             existing.last_word_tag = word_tag

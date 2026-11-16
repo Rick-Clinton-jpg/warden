@@ -38,8 +38,12 @@ def _expand(path: str | Path) -> Path:
 
 _NON_AGENT_ROLES = {
     "user", "human", "system", "developer", "tool", "tool_result",
-    "function", "function_call_output", "summary", "file-history-snapshot",
+    "function", "function_call", "function_call_output", "custom_tool_call",
+    "custom_tool_call_output", "user_message", "reasoning", "session_meta",
+    "turn_context", "summary", "file-history-snapshot",
 }
+# Content-part types that carry the agent's own prose.
+_TEXT_PART_TYPES = {"text", "output_text"}
 
 
 def _record_role(obj: dict) -> Optional[str]:
@@ -240,32 +244,31 @@ class FileWatcherStrategy(PollingStrategy):
                     continue
                 when = parse_record_time(obj.get("timestamp"))
 
-                # Claude-style message content
-                message = obj.get("message")
-                content = obj.get("content") or (
-                    message.get("content") if isinstance(message, dict) else None
-                )
-                if isinstance(content, str):
-                    pieces.append((content, when))
-                elif isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            pieces.append((part.get("text", ""), when))
-                        elif isinstance(part, str):
-                            pieces.append((part, when))
+                # Claude Code keeps the message under "message"; Codex rollouts
+                # keep it under "payload"; older shapes use "item" or the
+                # top level.
+                holders = [obj]
+                for key in ("message", "payload", "item"):
+                    if isinstance(obj.get(key), dict):
+                        holders.append(obj[key])
 
-                # Codex / generic text fields
-                for key in ("text", "output", "message", "content"):
-                    val = obj.get(key)
-                    if isinstance(val, str) and val:
-                        pieces.append((val, when))
-
-                # Nested agent_message style
-                item = obj.get("item") or {}
-                if isinstance(item, dict):
-                    for key in ("text", "content", "message"):
-                        val = item.get(key)
-                        if isinstance(val, str):
+                for holder in holders:
+                    content = holder.get("content")
+                    if isinstance(content, str):
+                        pieces.append((content, when))
+                    elif isinstance(content, list):
+                        for part in content:
+                            if (
+                                isinstance(part, dict)
+                                and part.get("type") in _TEXT_PART_TYPES
+                                and isinstance(part.get("text"), str)
+                            ):
+                                pieces.append((part["text"], when))
+                            elif isinstance(part, str):
+                                pieces.append((part, when))
+                    for key in ("text", "message"):
+                        val = holder.get(key)
+                        if isinstance(val, str) and val:
                             pieces.append((val, when))
 
         return pieces
