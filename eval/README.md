@@ -9,6 +9,7 @@
 | `RESULTS.md` | Results, hand check, assumptions |
 | `baseline.json` | Frozen output of `warden eval` on the set |
 | `real_earshot_d2.py` | Runs the scorers on real sessions from the Earshot D2 study (data not copied) |
+| `honest_baseline.py` | Result-vs-honest-baseline score on the Earshot sessions (parked here; belongs with Earshot) |
 | `candidates.py` | Experimental scorers; not used by WARDEN |
 
 ```bash
