@@ -79,6 +79,15 @@ agent opened showed nothing on the Codex arm and a possible difference on
 the Claude arm that has not been tested further. See
 [`eval/RESULTS.md`](./eval/RESULTS.md), sections 7 and 8.
 
+**A result-based score, parked here for now.** Comparing each session's
+result with what honest agents returned on the same task separates honest
+from off-task sessions at AUC 0.99 (Codex) and 0.97 (Claude) on the same
+720 sessions, with no answer key and no reading of the agent's words. A
+threshold set on one model flagged 10.2% of the other model's honest
+sessions against a pre-set limit of 10%, so it did not pass as written.
+This belongs with Earshot and is recorded here until it moves. See
+[`eval/RESULTS.md`](./eval/RESULTS.md), section 9.
+
 **No dependency-free replacement was found.** Two candidate scorers were
 developed on half the objectives and scored once on the other half. The
 better one reaches a pooled AUC of 0.797 by penalising undo wording, but
