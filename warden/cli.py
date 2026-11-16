@@ -85,6 +85,9 @@ def cli(ctx: click.Context, root: str) -> None:
 @click.option("--stale-after", "stale_after", default=DEFAULT_STALE_AFTER_SECONDS,
               show_default=True,
               help="Seconds after which a status is tagged STALE and not scored")
+@click.option("--reversal-check/--no-reversal-check", "reversal_check", default=True,
+              show_default=True,
+              help="Tag a status that describes undoing the objective as REVERSAL")
 @click.option("--once", is_flag=True, help="Register, run a single check, and exit")
 @click.option("--follow", is_flag=True,
               help="Register, then block and poll this session on --interval until Ctrl-C")
@@ -99,6 +102,7 @@ def watch_cmd(
     interval: int,
     transcript: str | None,
     stale_after: int,
+    reversal_check: bool,
     once: bool,
     follow: bool,
     background: bool,
@@ -117,6 +121,7 @@ def watch_cmd(
         interval_seconds=interval,
         transcript_path=transcript,
         stale_after_seconds=stale_after,
+        reversal_check=reversal_check,
     )
     click.echo(f"[warden] Registered session '{session.agent_id}'")
     click.echo(f"         objective : {session.objective}")
@@ -249,7 +254,7 @@ def audit_cmd(
 @click.option("--today", is_flag=True, help="Only today's records")
 @click.option("--session", default=None)
 @click.option("--tag", "tag", default="DRIFT", show_default=True,
-              help="Tag to filter by (DRIFT, DIVERGENT, UNCLEAR, MATCH, STALE)")
+              help="Tag to filter by (DRIFT, DIVERGENT, UNCLEAR, MATCH, STALE, REVERSAL)")
 @click.option("--limit", default=50, show_default=True)
 @click.pass_context
 def drifts_cmd(
