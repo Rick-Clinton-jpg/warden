@@ -57,6 +57,53 @@ the AUC-below-0.5 sense, worse.
 
 ---
 
+## Update — November 2026
+
+A re-evaluation and a hardening pass. The project stays on hold: the
+matcher is unchanged and still not usable as an on-task signal.
+
+**Re-evaluation.** The 60-pair set behind the figures above was never
+committed and could not be recovered, so those figures cannot be re-run.
+A new 240-pair set (20 objectives) is in [`eval/`](./eval), with the data,
+the plan written before scoring, and the full results:
+
+- With equal shares of four kinds of status, both raters score at chance:
+  pooled AUC 0.529 (word) and 0.499 (trigram).
+- The pooled figure depends on the mix. By kind, the matcher is perfect
+  (AUC 1.000) when on-task work reuses the objective's words and off-task
+  work does not, and exactly wrong (AUC 0.000) when on-task work is
+  paraphrased and off-task work reuses the words.
+- A status that reverses the objective is tagged `MATCH` 55 times in 60.
+  On-task work in different words is tagged `DRIFT` 57 times in 60.
+- The two raters correlate at r = 0.951.
+- Two dependency-free replacement scorers were tested on held-out
+  objectives. Neither can separate paraphrased on-task work from unrelated
+  work, so neither replaces the matcher.
+
+The set was written by an AI assistant to a fixed design and is not a
+sample of real agent traffic. See [`eval/DATASET.md`](./eval/DATASET.md)
+and [`eval/RESULTS.md`](./eval/RESULTS.md).
+
+**Fixed in this pass.**
+
+- A stale status is tagged `STALE` and not scored (see Status Freshness).
+- A mistyped session id resolves to nothing. It no longer falls back to
+  the newest Codex transcript or the first partial match.
+- Only the agent's own messages are read for `WARDEN_STATUS`. Text typed by
+  the user or returned by a tool is ignored. Each audit record names the
+  transcript it was read from.
+- The session registry survives unknown fields and unreadable records, is
+  written atomically, and is updated under a lock, so a session registered
+  while the daemon is running is no longer lost.
+- One failing session no longer stops the daemon.
+- Control characters are stripped from status text before it is stored or
+  printed.
+
+**Not fixed.** The matcher; the reliance on the agent emitting
+`WARDEN_STATUS` at all; duplicate audit rows for an unchanged status.
+
+---
+
 ## Install
 
 ```bash
@@ -225,10 +272,11 @@ warden eval eval/labelled_pairs.jsonl
 warden eval eval/labelled_pairs.jsonl --json > eval/baseline.json
 ```
 
-`warden eval` scores both raters against a hand-labelled JSONL file and
-reports AUC with a 95% bootstrap interval (fixed seed), the best accuracy
-at any threshold against the always-MATCH baseline, the Pearson correlation
-between the two raters, and the final tag by human label. The report
+`warden eval` scores both raters against a labelled JSONL file and reports
+AUC with a 95% bootstrap interval that resamples whole objectives (fixed
+seed), AUC for each kind of status, the best accuracy at any threshold
+against the always-MATCH baseline, the Pearson correlation between the two
+raters, and the final tag by kind. The report
 includes the SHA-256 of the data file. See [eval/README.md](./eval/README.md)
 for the file format.
 

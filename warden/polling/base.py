@@ -1,5 +1,6 @@
 """Abstract base for pluggable polling strategies."""
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
@@ -23,6 +24,21 @@ class StatusReading:
     observed_at: Optional[datetime] = None
     latest_possible_at: Optional[datetime] = None
     time_source: str = "none"
+    source: Optional[str] = None  # where the status was read from (e.g. transcript path)
+
+
+MAX_STATUS_CHARS = 500
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def sanitize_status(text: str) -> str:
+    """Strip control characters (including ANSI escapes) and cap the length.
+
+    The status is written by the process being observed and is later printed
+    to the operator's terminal; it must not be able to clear the screen or
+    forge WARDEN's own output.
+    """
+    return _CONTROL_CHARS.sub("", text).strip()[:MAX_STATUS_CHARS]
 
 
 class PollingStrategy(ABC):
@@ -64,7 +80,7 @@ class PollingStrategy(ABC):
                 if len(parts) == 2:
                     status = parts[1].strip()
                     # Truncate at first embedded newline (shouldn't happen)
-                    status = status.split("\n")[0].strip()
+                    status = sanitize_status(status.split("\n")[0])
                     if status:
                         latest = status
         return latest

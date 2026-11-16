@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import sys
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, fields, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -69,6 +72,10 @@ class Session:
     last_status_age_seconds: Optional[float] = None
 
 
+class RegistryError(RuntimeError):
+    """The session registry exists but cannot be read."""
+
+
 class Warden:
     def __init__(self, root: Path | str = ".warden"):
         self.root = Path(root)
@@ -78,27 +85,83 @@ class Warden:
         self.registry_path = self.root / "sessions.json"
         self.audit = AuditLogger(self.root)
         self._sessions: dict[str, Session] = {}
+        self._unreadable: list = []
         self._load_registry()
 
     # ------------------------------------------------------------------
     # Registry persistence
     # ------------------------------------------------------------------
     def _load_registry(self) -> None:
+        """Replace the in-memory registry with what is on disk.
+
+        Each record is parsed on its own: one bad record never hides the
+        others. Records that cannot be read are kept verbatim and written
+        back on save, so nothing is lost by a load/save round trip.
+        """
+        self._sessions = {}
+        self._unreadable: list = []
         if not self.registry_path.exists():
             return
         try:
             data = json.loads(self.registry_path.read_text(encoding="utf-8"))
-            for item in data:
-                s = Session(**item)
+            if not isinstance(data, list):
+                raise ValueError("registry is not a list")
+        except (OSError, ValueError) as exc:
+            raise RegistryError(
+                f"Cannot read session registry {self.registry_path}: {exc}. "
+                "Fix or move the file; WARDEN will not overwrite it."
+            ) from exc
+
+        known = {f.name for f in fields(Session)}
+        for item in data:
+            try:
+                # Fields this version does not know are ignored, not fatal.
+                s = Session(**{k: v for k, v in item.items() if k in known})
                 self._sessions[s.agent_id] = s
-        except Exception:
-            pass
+            except Exception as exc:
+                self._unreadable.append(item)
+                print(
+                    f"[warden] Skipped unreadable registry record ({exc}); "
+                    "kept on disk unchanged.",
+                    file=sys.stderr,
+                )
 
     def _save_registry(self) -> None:
-        data = [asdict(s) for s in self._sessions.values()]
-        self.registry_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        data = [asdict(s) for s in self._sessions.values()] + list(self._unreadable)
+        tmp = self.registry_path.with_name(self.registry_path.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, self.registry_path)  # atomic: readers never see half a file
+
+    @contextlib.contextmanager
+    def _locked(self):
+        """Exclusive lock across processes for read-modify-write of the registry."""
+        lock_path = self.root / "sessions.lock"
+        with open(lock_path, "a+") as handle:
+            try:
+                import fcntl
+            except ImportError:  # Windows: no advisory lock; writes stay atomic
+                yield
+                return
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def _mutate(self, agent_id: str, change) -> Optional[Session]:
+        """Apply `change(session_or_None) -> Session | None` to ONE session.
+
+        Re-reads the registry under the lock first, so a session registered
+        or stopped by another process in the meantime is never overwritten
+        by this process's older copy.
+        """
+        with self._locked():
+            self._load_registry()
+            updated = change(self._sessions.get(agent_id))
+            if updated is not None:
+                self._sessions[agent_id] = updated
+                self._save_registry()
+            return updated
 
     def _objective_path(self, agent_id: str) -> Path:
         safe = agent_id.replace("/", "_").replace(" ", "_")
@@ -128,17 +191,17 @@ class Warden:
             active=True,
             stale_after_seconds=stale_after_seconds,
         )
-        self._sessions[agent_id] = session
+        self._mutate(agent_id, lambda _existing: session)
         self._objective_path(agent_id).write_text(objective.strip() + "\n", encoding="utf-8")
-        self._save_registry()
         return session
 
     def stop(self, agent_id: str) -> bool:
-        if agent_id not in self._sessions:
-            return False
-        self._sessions[agent_id].active = False
-        self._save_registry()
-        return True
+        def deactivate(existing: Optional[Session]) -> Optional[Session]:
+            if existing is not None:
+                existing.active = False
+            return existing
+
+        return self._mutate(agent_id, deactivate) is not None
 
     def list_sessions(self, active_only: bool = True) -> list[Session]:
         sessions = list(self._sessions.values())
@@ -184,6 +247,7 @@ class Warden:
             ),
             "freshness_basis": fresh.basis,
             "stale_after_seconds": session.stale_after_seconds,
+            "transcript": reading.source if reading else None,
         }
 
         if status and fresh.state == STALE:
@@ -225,14 +289,21 @@ class Warden:
             extra=extra,
         )
 
-        session.last_checked = now.isoformat(timespec="seconds")
-        session.last_status = status
-        session.last_tag = final_tag
-        session.last_word_tag = word_tag
-        session.last_trigram_tag = trigram_tag
-        session.last_freshness = fresh.state
-        session.last_status_age_seconds = freshness_extra["status_age_seconds"]
-        self._save_registry()
+        checked_at = now.isoformat(timespec="seconds")
+
+        def record(existing: Optional[Session]) -> Optional[Session]:
+            if existing is None:      # removed by another process meanwhile
+                return None
+            existing.last_checked = checked_at
+            existing.last_status = status
+            existing.last_tag = final_tag
+            existing.last_word_tag = word_tag
+            existing.last_trigram_tag = trigram_tag
+            existing.last_freshness = fresh.state
+            existing.last_status_age_seconds = freshness_extra["status_age_seconds"]
+            return existing
+
+        self._mutate(agent_id, record)
 
         return {
             "agent_id": session.agent_id,
@@ -242,7 +313,8 @@ class Warden:
             "word_tag": word_tag,
             "trigram_tag": trigram_tag,
             "note": note,
-            "timestamp": session.last_checked,
+            "timestamp": checked_at,
+            "transcript": reading.source if reading else None,
             "freshness": fresh.state,
             "status_age_seconds": freshness_extra["status_age_seconds"],
             "status_min_age_seconds": freshness_extra["status_min_age_seconds"],
@@ -298,6 +370,10 @@ class Warden:
             last = datetime.fromisoformat(session.last_checked)
         except ValueError:
             return True
+        if last.tzinfo is None:
+            # A timestamp without an offset cannot be compared safely;
+            # checking early is harmless, crashing the daemon is not.
+            return True
         return (now - last).total_seconds() >= session.interval_seconds
 
     def run_daemon(self, tick_seconds: int = 30) -> None:
@@ -316,9 +392,17 @@ class Warden:
                     print("[warden] No active sessions yet — waiting...")
                 now = datetime.now().astimezone()
                 for session in active:
-                    if self._is_due(session, now):
-                        result = self.check_once(session.agent_id)
-                        print(format_result_line(result, agent_id=session.agent_id))
+                    try:
+                        if self._is_due(session, now):
+                            result = self.check_once(session.agent_id)
+                            print(format_result_line(result, agent_id=session.agent_id))
+                    except Exception as exc:
+                        # One bad session must not stop monitoring of the rest.
+                        print(
+                            f"[warden] Check failed for {session.agent_id}: "
+                            f"{type(exc).__name__}: {exc}",
+                            file=sys.stderr,
+                        )
                 time.sleep(tick_seconds)
         except KeyboardInterrupt:
             print("\n[warden] Daemon stopped.")

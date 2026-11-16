@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from .base import PollingStrategy, StatusReading
+from .base import PollingStrategy, StatusReading, sanitize_status
 
 
 class ManualInputStrategy(PollingStrategy):
@@ -24,7 +24,7 @@ class ManualInputStrategy(PollingStrategy):
         # Accept either the full "WARDEN_STATUS: ..." line or just the text
         if raw.startswith("WARDEN_STATUS:"):
             return self.extract_status(raw)
-        return raw
+        return sanitize_status(raw) or None
     def read(self, session_id: str) -> Optional[StatusReading]:
         text = self.poll(session_id)
         if not text:

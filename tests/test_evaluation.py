@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from warden.evaluation import (
-    auc, best_threshold, bootstrap_auc_ci, evaluate, evaluate_file,
+    auc, best_threshold, cluster_bootstrap_auc_ci, evaluate, evaluate_file,
     format_report, load_pairs, pearson,
 )
 
@@ -41,11 +41,37 @@ def test_pearson():
     assert pearson([1, 1, 1], [1, 2, 3]) is None
 
 
-def test_bootstrap_is_deterministic_and_brackets_the_estimate():
-    pos, neg = [0.9, 0.7, 0.6, 0.3], [0.8, 0.4, 0.2, 0.1]
-    first = bootstrap_auc_ci(pos, neg)
-    assert first == bootstrap_auc_ci(pos, neg)
+def test_cluster_bootstrap_is_deterministic_and_brackets_the_estimate():
+    scores = [0.9, 0.2, 0.7, 0.8, 0.6, 0.4, 0.3, 0.1]
+    labels = ["on_task", "off_task"] * 4
+    clusters = ["a", "a", "b", "b", "c", "c", "d", "d"]
+    first = cluster_bootstrap_auc_ci(scores, labels, clusters)
+    assert first == cluster_bootstrap_auc_ci(scores, labels, clusters)
+    pos = scores[0::2]; neg = scores[1::2]
     assert first[0] <= auc(pos, neg) <= first[1]
+
+
+def test_single_cluster_has_no_interval():
+    assert cluster_bootstrap_auc_ci([0.9, 0.1], ["on_task", "off_task"], ["a", "a"]) is None
+
+
+def test_by_kind_contrasts_and_split(tmp_path: Path):
+    rows = []
+    for obj in ("Build the importer", "Write the exporter"):
+        for kind, label, status in (
+            ("on_echo", "on_task", f"{obj} now"),
+            ("off_unrelated", "off_task", "Painting the fence"),
+        ):
+            rows.append({"objective": obj, "status": status, "label": label,
+                         "kind": kind, "split": "dev" if "importer" in obj else "test"})
+    path = _write(tmp_path / "k.jsonl", rows)
+    report = evaluate_file(path)
+    assert report["n_clusters"] == 2
+    assert report["raters"]["word"]["by_kind"]["on_echo vs off_unrelated"]["auc"] == 1.0
+    assert report["final_tag_by"] == "kind"
+    assert evaluate_file(path, split="dev")["n"] == 2
+    with pytest.raises(ValueError):
+        evaluate_file(path, split="nope")
 
 
 def _write(path: Path, rows: list[dict]) -> Path:

@@ -36,6 +36,24 @@ def _expand(path: str | Path) -> Path:
     return Path(path).expanduser().resolve()
 
 
+_NON_AGENT_ROLES = {
+    "user", "human", "system", "developer", "tool", "tool_result",
+    "function", "function_call_output", "summary", "file-history-snapshot",
+}
+
+
+def _record_role(obj: dict) -> Optional[str]:
+    """Who authored a transcript record, if the record says."""
+    candidates = []
+    for holder in (obj.get("message"), obj.get("payload"), obj.get("item"), obj):
+        if isinstance(holder, dict):
+            candidates += [holder.get("role"), holder.get("type")]
+    for value in candidates:
+        if isinstance(value, str) and value.lower() in _NON_AGENT_ROLES:
+            return value.lower()
+    return None
+
+
 class FileWatcherStrategy(PollingStrategy):
     """
     Poll Claude Code / Codex session transcripts for the latest
@@ -103,6 +121,7 @@ class FileWatcherStrategy(PollingStrategy):
                     observed_at=record_time,
                     latest_possible_at=mtime,
                     time_source="record-timestamp" if record_time else "file-mtime",
+                    source=str(path),
                 )
         return latest
 
@@ -136,32 +155,33 @@ class FileWatcherStrategy(PollingStrategy):
                 return None
 
         # Exact match first
-        for path in projects.rglob(f"{session_id}.jsonl"):
-            return path
+        exact = sorted(projects.rglob(f"{session_id}.jsonl"))
+        if len(exact) == 1:
+            return exact[0]
+        if exact:
+            return None  # same id under several projects: ambiguous
 
-        # Fuzzy: session_id may be a short prefix
-        for path in projects.rglob("*.jsonl"):
-            if session_id in path.stem:
-                return path
-
-        return None
+        # A short id is accepted only when it identifies exactly one session.
+        return self._only(
+            p for p in projects.rglob("*.jsonl") if session_id in p.stem
+        )
 
     def _find_codex_session(self, session_id: str) -> Optional[Path]:
-        """Search ~/.codex/sessions/** for matching rollout-*.jsonl"""
+        """Search ~/.codex/sessions/** for the rollout file naming this session."""
         sessions = self.codex_root / "sessions"
         if not sessions.is_dir():
             return None
+        return self._only(sessions.rglob(f"*{session_id}*.jsonl"))
 
-        candidates = list(sessions.rglob(f"*{session_id}*.jsonl"))
-        if not candidates:
-            candidates = list(sessions.rglob("rollout-*.jsonl"))
+    @staticmethod
+    def _only(paths) -> Optional[Path]:
+        """Return the single match, or None for zero or several.
 
-        if not candidates:
-            return None
-
-        # Prefer most recently modified
-        candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        return candidates[0]
+        Never fall back to "the newest file": a mistyped session id must
+        resolve to nothing, not to somebody else's session.
+        """
+        found = list(paths)
+        return found[0] if len(found) == 1 else None
 
     def _read_tail(self, path: Path) -> str:
         """Read the last N lines efficiently without loading huge files."""
@@ -214,6 +234,10 @@ class FileWatcherStrategy(PollingStrategy):
 
             # Common shapes
             if isinstance(obj, dict):
+                if _record_role(obj) in _NON_AGENT_ROLES:
+                    # Text typed by the user, returned by a tool or injected
+                    # by the system is not the agent's own status.
+                    continue
                 when = parse_record_time(obj.get("timestamp"))
 
                 # Claude-style message content

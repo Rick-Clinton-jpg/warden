@@ -9,7 +9,7 @@ from pathlib import Path
 import click
 
 from . import __version__
-from .core import Warden
+from .core import RegistryError, Warden
 from .freshness import DEFAULT_STALE_AFTER_SECONDS
 
 
@@ -69,7 +69,10 @@ def _parse_since(value: str) -> datetime:
 def cli(ctx: click.Context, root: str) -> None:
     """WARDEN — Lightweight agent drift detection & audit."""
     ctx.ensure_object(dict)
-    ctx.obj["warden"] = Warden(root=root)
+    try:
+        ctx.obj["warden"] = Warden(root=root)
+    except RegistryError as exc:
+        raise click.ClickException(str(exc))
 
 
 @cli.command("watch")
@@ -296,12 +299,13 @@ def daemon_cmd(ctx: click.Context, tick_seconds: int) -> None:
 @cli.command("eval")
 @click.argument("pairs_file", type=click.Path(exists=True, dir_okay=False))
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
-def eval_cmd(pairs_file: str, as_json: bool) -> None:
-    """Score the matcher against a hand-labelled pairs file (JSONL)."""
+@click.option("--split", default=None, help="Only score pairs with this 'split' value")
+def eval_cmd(pairs_file: str, as_json: bool, split: str | None) -> None:
+    """Score the matcher against a labelled pairs file (JSONL)."""
     from .evaluation import evaluate_file, format_report
 
     try:
-        report = evaluate_file(pairs_file)
+        report = evaluate_file(pairs_file, split=split)
     except ValueError as exc:
         raise click.ClickException(str(exc))
     if as_json:
