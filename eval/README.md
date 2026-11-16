@@ -3,6 +3,7 @@
 | File | What it is |
 |------|------------|
 | `labelled_pairs.jsonl` | 240 labelled objective/status pairs |
+| `mutation_pairs.jsonl` | 120 statuses testing the reversal check |
 | `DATASET.md` | How the set was designed and what it does not show |
 | `PLAN.md` | Analysis plan and replacement gate, committed before scoring |
 | `RESULTS.md` | Results, hand check, assumptions |

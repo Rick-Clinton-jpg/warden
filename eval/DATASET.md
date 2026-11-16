@@ -31,3 +31,15 @@ committed and could not be recovered, so those figures cannot be re-run.
   property of this mix. The per-kind results are the ones to read.
 - The file was committed before the matcher was run on it. The commit
   history shows the order.
+
+# mutation_pairs.jsonl
+
+120 statuses on 12 further objectives, used only to test the reversal
+check (`warden/reversal.py`). Design, classes and decision rule are in
+`PLAN.md` (Plan 2); results are in `RESULTS.md`, section 6.
+
+Each objective has five reversals, built by a named mutation (antonym verb,
+explicit undo, abandonment, substitution, implicit contradiction), and five
+non-reversals, including on-task work that legitimately uses removal
+wording. Written by the same AI author after the check was frozen and
+before it was scored; labels follow from the class.

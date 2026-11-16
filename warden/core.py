@@ -15,6 +15,7 @@ from typing import Optional
 from .audit import AuditLogger
 from .freshness import DEFAULT_STALE_AFTER_SECONDS, STALE, assess, format_age
 from .matcher import dual_compare
+from .reversal import check_reversal
 from .polling import get_strategy, PollingStrategy
 
 
@@ -37,6 +38,10 @@ def format_result_line(result: dict, *, agent_id: Optional[str] = None) -> str:
         return (
             f"{prefix}{tag:9} | word={word_tag} trigram={trigram_tag} | "
             f"{status[:80]}"
+        )
+    if tag == "REVERSAL":
+        return (
+            f"{prefix}{tag:9} | cue='{result.get('reversal_cue')}' | {status[:80]}"
         )
     if tag == "STALE":
         age = result.get("status_age_seconds")
@@ -70,6 +75,10 @@ class Session:
     stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS
     last_freshness: Optional[str] = None
     last_status_age_seconds: Optional[float] = None
+    # Tag a status that describes undoing the objective as REVERSAL.
+    # Off by default: on the mutation test set it flagged 30% of statuses
+    # that were not reversals (eval/RESULTS.md, section 6).
+    reversal_check: bool = False
 
 
 class RegistryError(RuntimeError):
@@ -179,6 +188,7 @@ class Warden:
         interval_seconds: int = 600,
         transcript_path: Optional[str] = None,
         stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
+        reversal_check: bool = False,
     ) -> Session:
         """Register a session for monitoring."""
         session = Session(
@@ -190,6 +200,7 @@ class Warden:
             transcript_path=transcript_path,
             active=True,
             stale_after_seconds=stale_after_seconds,
+            reversal_check=reversal_check,
         )
         self._mutate(agent_id, lambda _existing: session)
         self._objective_path(agent_id).write_text(objective.strip() + "\n", encoding="utf-8")
@@ -270,9 +281,23 @@ class Warden:
             final_tag = result.final_tag
             word_tag, trigram_tag = result.word_tag, result.trigram_tag
             note = result.note
+            reversal = (
+                check_reversal(status, session.objective)
+                if status and session.reversal_check else None
+            )
+            if reversal is not None and reversal.reversal:
+                # The matcher cannot see direction; this check can, for
+                # reversals that are worded as one. It overrides the tag.
+                final_tag = "REVERSAL"
+                note = (
+                    f"Status describes undoing the objective (cue: '{reversal.cue}'). "
+                    f"Word-overlap raters said {word_tag}/{trigram_tag}. Verify with user."
+                )
             if status and fresh.state != "FRESH":
                 note += " Status age could not be verified."
             extra = {
+                "reversal": bool(reversal and reversal.reversal),
+                "reversal_cue": reversal.cue if reversal else None,
                 "word_tag": result.word_tag,
                 "word_score": round(result.word_score, 3),
                 "trigram_tag": result.trigram_tag,
@@ -323,6 +348,7 @@ class Warden:
             "freshness": fresh.state,
             "status_age_seconds": freshness_extra["status_age_seconds"],
             "status_min_age_seconds": freshness_extra["status_min_age_seconds"],
+            "reversal_cue": extra.get("reversal_cue"),
         }
 
     def check_all(self) -> list[dict]:

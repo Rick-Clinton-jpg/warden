@@ -2,7 +2,7 @@
 
 **Lightweight Agent Drift Detection & Audit System**
 
-Version 0.2.0
+Version 0.3.0
 
 > **ON HOLD — prototype stage, not production-ready.** Core detector found to have a fundamental scoring flaw; see [Known Issues / Limitations](#known-issues--limitations) below.
 
@@ -12,7 +12,7 @@ It only:
 
 1. Collects a single-line status the agent emits every N minutes  
 2. Compares that status to the original objective  
-3. Tags it `MATCH` / `DRIFT` / `UNCLEAR` / `DIVERGENT`, or `STALE` when the status is too old to score  
+3. Tags it `MATCH` / `DRIFT` / `UNCLEAR` / `DIVERGENT`, or `STALE` when the status is too old to score (plus `REVERSAL`, if the optional reversal check is switched on)  
 4. Writes a short note to an append-only NDJSON audit trail  
 
 ---
@@ -62,6 +62,16 @@ neither separates on-task work in different words from unrelated work
 (AUC 0.516, interval spans 0.5) — the two share no words with the objective.
 That needs a signal other than shared words.
 
+**An optional reversal check exists, off by default.** `--reversal-check`
+tags a status that describes undoing the objective as `REVERSAL`. On a
+120-status mutation test it caught 44 of 60 reversals (every explicit undo,
+abandonment and "instead of" case; none of the reversals worded without an
+undo word). It also flagged 18 of 60 statuses that were not reversals — all
+of them on-task work that removes something else on the way, such as
+"Removing duplicate log lines so audit logging records each action once".
+It reads the verb, not what the verb acts on, so it failed the false-flag
+limit set before the test and is not on by default.
+
 **The dual-rater system is not independent.** Word-Jaccard and
 trigram-Jaccard scores correlate at Pearson r = 0.951. Agreement between the
 two raters is not corroboration, and their disagreement (the `DIVERGENT` tag)
@@ -79,6 +89,16 @@ emits one produces only `UNCLEAR`.
 assistant to a fixed design, with labels that follow from the design; no
 human labelled it, and it is not a sample of real agent traffic. See
 [`eval/DATASET.md`](./eval/DATASET.md).
+
+**Related work.** The same failure is documented for embedding-cosine
+gates in *Similarity Gates Approve Reversals: A Validity Audit of
+Embedding-Cosine Thresholds in Agent Systems*
+([arXiv:2608.10216](https://arxiv.org/abs/2608.10216), submitted 10 August
+2026, five days before this repository's first commit). It reports that
+reversals keep high word overlap with the original while faithful rewrites
+do not, that a naive test set therefore yields an AUROC of exactly 0.000,
+and that the figure is an artifact of the pair mix. The results here are
+consistent with it, on a lexical scorer used for agent status monitoring.
 
 **Earlier figures.** Versions of this README up to 0.1.1 reported
 AUC = 0.332 on a 60-pair set, r = 0.934, and a median status age of 33.8
@@ -112,6 +132,15 @@ The matcher is unchanged. Everything else below is fixed.
 - **Terminal safety.** Control characters are stripped from status text.
 - **Audit trail.** Each record says whether it differs from the previous
   poll; `warden audit --changes-only` hides the repeats.
+
+## Changes in 0.3.0 (November 2026)
+
+- **Reversal check (experimental, off by default).** `warden watch
+  --reversal-check` adds a `REVERSAL` tag for statuses that describe
+  undoing the objective. Measured recall 0.73, false-flag rate 0.30; see
+  Known Issues and [`eval/RESULTS.md`](./eval/RESULTS.md), section 6.
+- **Mutation test set.** `eval/mutation_pairs.jsonl`, 120 statuses on 12
+  objectives, built from named mutations of on-task statuses.
 
 ---
 
@@ -329,6 +358,8 @@ Audit records are newline-delimited JSON:
   "status_time": "2026-08-15T09:10:28+05:30",
   "freshness_basis": "record-timestamp",
   "stale_after_seconds": 1800,
+  "reversal": false,
+  "reversal_cue": null,
   "transcript": "/home/me/.claude/projects/intentgraph/abc123.jsonl",
   "changed": true
 }
@@ -347,7 +378,7 @@ Audit records are newline-delimited JSON:
 
 ## Status
 
-- Design: prototype (v0.2.0) — on hold; core detector unchanged and not trustworthy, see [Known Issues / Limitations](#known-issues--limitations)
+- Design: prototype (v0.3.0) — on hold; core detector unchanged and not trustworthy, see [Known Issues / Limitations](#known-issues--limitations)
 - Implementation: working CLI + multi-session daemon + Claude Code / Codex file watchers + audit trail; dual-rater matcher runs, but its scoring is not trustworthy (see Known Issues)
 - Tests: matcher, audit, polling, freshness, registry, daemon and the evaluation harness. The scoring flaw itself is pinned by strict expected-failure tests and a frozen baseline, so it cannot change unnoticed
 

@@ -30,3 +30,40 @@ Gate 1 is the real test. A scorer that cannot tell on-task work in
 different words from unrelated work still raises a false DRIFT on normal
 traffic, whatever its pooled AUC. If no candidate passes, the matcher is
 not replaced and the project stays on hold.
+
+---
+
+# Plan 2 — reversal warning (committed before the mutation set was written or scored)
+
+`warden/reversal.py` is frozen in this commit. It was developed on all 240
+pairs of `labelled_pairs.jsonl`, which therefore cannot test it
+(on that file: 54 of 60 reversals flagged, 0 of 180 other statuses flagged).
+
+## Test set: `mutation_pairs.jsonl`
+12 objectives that appear nowhere in `labelled_pairs.jsonl`; 4 of them
+reductive ("Remove ...", "Reduce ..."). Per objective, 10 statuses:
+
+| class | label | what it is |
+|---|---|---|
+| `M1_antonym` | reversal | on-task status with its verb swapped for the opposite |
+| `M2_undo` | reversal | explicit undo of the work (revert, roll back, undo) |
+| `M3_abandon` | reversal | negation or abandonment (stop, no longer, give up, cancel) |
+| `M4_substitute` | reversal | does something else in place of the objective |
+| `M5_implicit` | reversal | contradicts the objective with no undo wording at all |
+| `C1_base` | not_reversal | plain on-task status |
+| `C2_reworded` | not_reversal | the same on-task work, reworded |
+| `C3_undo_word_on_task` (x2) | not_reversal | on-task work that legitimately uses remove/delete/drop/revert wording |
+| `C4_undo_word_unrelated` | not_reversal | unrelated work that uses undo wording |
+
+M5 is included knowing the check cannot catch it; C3 and C4 are included
+because they are where a wording check should raise false flags.
+
+## Measures
+- Recall: flagged reversals / 60, overall and per mutation class.
+- False-flag rate: flagged non-reversals / 60, overall and per control class.
+- Wilson 95% intervals, and a bootstrap over objectives for the two totals.
+
+## Decision rule
+The check stays on by default only if, on this set, recall >= 0.60 AND
+false-flag rate <= 0.10. Otherwise it ships off by default
+(`--reversal-check` to opt in). Scored once; no changes to the check after.
