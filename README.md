@@ -97,7 +97,10 @@ Embedding-Cosine Thresholds in Agent Systems*
 2026, five days before this repository's first commit). It reports that
 reversals keep high word overlap with the original while faithful rewrites
 do not, that a naive test set therefore yields an AUROC of exactly 0.000,
-and that the figure is an artifact of the pair mix. The results here are
+and that the figure is an artifact of the pair mix.
+
+WARDEN was built and its flaw disclosed independently of that paper, which
+the author did not know of until 16 November 2026. The results here are
 consistent with it, on a lexical scorer used for agent status monitoring.
 
 **Earlier figures.** Versions of this README up to 0.1.1 reported
