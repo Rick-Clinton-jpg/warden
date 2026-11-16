@@ -257,13 +257,16 @@ def evaluate_file(path: str | Path, split: str | None = None) -> dict:
 
 
 def _verdict(ci) -> str:
+    """Describe where the interval sits. Deliberately not a significance
+    claim: the interval is optimistic with few objectives, and a file's
+    pre-committed tests (see eval/PLAN.md) decide what can be claimed."""
     if ci is None:
         return "no interval (one objective)"
     if ci[1] < 0.5:
-        return "inverted"
+        return "interval below 0.5"
     if ci[0] > 0.5:
-        return "better than chance"
-    return "not distinguishable from chance"
+        return "interval above 0.5"
+    return "interval spans 0.5"
 
 
 def _fmt_auc(block: dict) -> str:
