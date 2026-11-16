@@ -4,7 +4,7 @@
 
 Version 0.3.2
 
-> **ON HOLD — prototype stage, not production-ready.** Core detector found to have a fundamental scoring flaw; see [Known Issues / Limitations](#known-issues--limitations) below.
+> **CONCLUDED AS A CASE STUDY (November 2026) — not a working drift detector.** The core detector has a fundamental scoring flaw that no word-based fix removed; see [Known Issues / Limitations](#known-issues--limitations) below. The repository is kept as a measured, reproducible record of that failure. No further development is planned.
 
 Warden is an external observer for long-running AI coding agents (Claude Code, Codex, and others).  
 It does **not** control, rewrite, or interrupt the agent.  
@@ -418,11 +418,13 @@ Audit records are newline-delimited JSON:
 
 ## Status
 
-- Design: prototype (v0.3.2) — on hold; core detector unchanged and not trustworthy, see [Known Issues / Limitations](#known-issues--limitations)
+- Design: prototype (v0.3.2) — concluded; core detector unchanged and not trustworthy, see [Known Issues / Limitations](#known-issues--limitations)
 - Implementation: working CLI + multi-session daemon + Claude Code / Codex file watchers + audit trail; dual-rater matcher runs, but its scoring is not trustworthy (see Known Issues)
 - Tests: matcher, audit, polling, freshness, registry, daemon and the evaluation harness. The scoring flaw itself is pinned by strict expected-failure tests and a frozen baseline, so it cannot change unnoticed
 
 Built to be small, honest, and useful. Right now it's small and honest about its own flaw; not yet useful for its stated purpose.
+
+Work on WARDEN concluded on 16 November 2026. What it leaves behind is the evidence in [`eval/`](./eval): on 720 real agent sessions, nothing the agent said about itself reliably showed when it was off task, and an external check on the result did.
 
 ## License
 Licensed under PolyForm Noncommercial 1.0.0 — free to use, including
