@@ -1,6 +1,6 @@
 """Pluggable polling strategies."""
 
-from .base import PollingStrategy
+from .base import PollingStrategy, StatusReading
 from .file_watcher import FileWatcherStrategy
 from .manual import ManualInputStrategy
 from .stdout_scrape import StdoutScrapeStrategy
@@ -30,6 +30,7 @@ def get_strategy(name: str, **kwargs) -> PollingStrategy:
 
 __all__ = [
     "PollingStrategy",
+    "StatusReading",
     "FileWatcherStrategy",
     "ManualInputStrategy",
     "StdoutScrapeStrategy",

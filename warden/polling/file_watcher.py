@@ -4,14 +4,58 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .base import PollingStrategy
+from .base import PollingStrategy, StatusReading
+
+
+def parse_record_time(value: object) -> Optional[datetime]:
+    """Parse a transcript record's ISO-8601 timestamp into an aware datetime.
+
+    Returns None for anything that is not an unambiguous point in time
+    (missing, malformed, or without a UTC offset) -- a guessed timezone
+    would make a stale status look fresh or the reverse.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
 
 
 def _expand(path: str | Path) -> Path:
     return Path(path).expanduser().resolve()
+
+
+_NON_AGENT_ROLES = {
+    "user", "human", "system", "developer", "tool", "tool_result",
+    "function", "function_call", "function_call_output", "custom_tool_call",
+    "custom_tool_call_output", "user_message", "reasoning", "session_meta",
+    "turn_context", "summary", "file-history-snapshot",
+}
+# Content-part types that carry the agent's own prose.
+_TEXT_PART_TYPES = {"text", "output_text"}
+
+
+def _record_role(obj: dict) -> Optional[str]:
+    """Who authored a transcript record, if the record says."""
+    candidates = []
+    for holder in (obj.get("message"), obj.get("payload"), obj.get("item"), obj):
+        if isinstance(holder, dict):
+            candidates += [holder.get("role"), holder.get("type")]
+    for value in candidates:
+        if isinstance(value, str) and value.lower() in _NON_AGENT_ROLES:
+            return value.lower()
+    return None
 
 
 class FileWatcherStrategy(PollingStrategy):
@@ -52,20 +96,38 @@ class FileWatcherStrategy(PollingStrategy):
         self.max_tail_lines = max_tail_lines
 
     def poll(self, session_id: str) -> Optional[str]:
+        reading = self.read(session_id)
+        return reading.text if reading else None
+
+    def read(self, session_id: str) -> Optional[StatusReading]:
         path = self._resolve_transcript(session_id)
         if path is None or not path.exists():
             return None
 
         try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
             text = self._read_tail(path)
         except OSError:
             return None
 
-        # JSONL transcripts: extract text content from messages
+        # JSONL transcripts: keep each record's own timestamp with its text
         if path.suffix == ".jsonl":
-            text = self._extract_text_from_jsonl(text)
+            pieces = self._extract_pieces_from_jsonl(text)
+        else:
+            pieces = [(text, None)]
 
-        return self.extract_status(text)
+        latest: Optional[StatusReading] = None
+        for piece_text, record_time in pieces:
+            status = self.extract_status(piece_text)
+            if status:
+                latest = StatusReading(
+                    text=status,
+                    observed_at=record_time,
+                    latest_possible_at=mtime,
+                    time_source="record-timestamp" if record_time else "file-mtime",
+                    source=str(path),
+                )
+        return latest
 
     def _resolve_transcript(self, session_id: str) -> Optional[Path]:
         if self.transcript_path is not None:
@@ -97,32 +159,33 @@ class FileWatcherStrategy(PollingStrategy):
                 return None
 
         # Exact match first
-        for path in projects.rglob(f"{session_id}.jsonl"):
-            return path
+        exact = sorted(projects.rglob(f"{session_id}.jsonl"))
+        if len(exact) == 1:
+            return exact[0]
+        if exact:
+            return None  # same id under several projects: ambiguous
 
-        # Fuzzy: session_id may be a short prefix
-        for path in projects.rglob("*.jsonl"):
-            if session_id in path.stem:
-                return path
-
-        return None
+        # A short id is accepted only when it identifies exactly one session.
+        return self._only(
+            p for p in projects.rglob("*.jsonl") if session_id in p.stem
+        )
 
     def _find_codex_session(self, session_id: str) -> Optional[Path]:
-        """Search ~/.codex/sessions/** for matching rollout-*.jsonl"""
+        """Search ~/.codex/sessions/** for the rollout file naming this session."""
         sessions = self.codex_root / "sessions"
         if not sessions.is_dir():
             return None
+        return self._only(sessions.rglob(f"*{session_id}*.jsonl"))
 
-        candidates = list(sessions.rglob(f"*{session_id}*.jsonl"))
-        if not candidates:
-            candidates = list(sessions.rglob("rollout-*.jsonl"))
+    @staticmethod
+    def _only(paths) -> Optional[Path]:
+        """Return the single match, or None for zero or several.
 
-        if not candidates:
-            return None
-
-        # Prefer most recently modified
-        candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        return candidates[0]
+        Never fall back to "the newest file": a mistyped session id must
+        resolve to nothing, not to somebody else's session.
+        """
+        found = list(paths)
+        return found[0] if len(found) == 1 else None
 
     def _read_tail(self, path: Path) -> str:
         """Read the last N lines efficiently without loading huge files."""
@@ -151,7 +214,17 @@ class FileWatcherStrategy(PollingStrategy):
         Pull human-readable text out of Claude/Codex JSONL transcripts
         so that WARDEN_STATUS lines embedded in assistant messages are visible.
         """
-        pieces: list[str] = []
+        return "\n".join(text for text, _ in self._extract_pieces_from_jsonl(raw))
+
+    def _extract_pieces_from_jsonl(
+        self, raw: str
+    ) -> list[tuple[str, Optional[datetime]]]:
+        """
+        Same extraction as _extract_text_from_jsonl, but each piece of text
+        keeps the timestamp of the JSONL record it came from (None when the
+        record has no usable top-level "timestamp").
+        """
+        pieces: list[tuple[str, Optional[datetime]]] = []
         for line in raw.splitlines():
             line = line.strip()
             if not line:
@@ -160,34 +233,42 @@ class FileWatcherStrategy(PollingStrategy):
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 # Plain text line — keep it
-                pieces.append(line)
+                pieces.append((line, None))
                 continue
 
             # Common shapes
             if isinstance(obj, dict):
-                # Claude-style message content
-                content = obj.get("content") or obj.get("message", {}).get("content")
-                if isinstance(content, str):
-                    pieces.append(content)
-                elif isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            pieces.append(part.get("text", ""))
-                        elif isinstance(part, str):
-                            pieces.append(part)
+                if _record_role(obj) in _NON_AGENT_ROLES:
+                    # Text typed by the user, returned by a tool or injected
+                    # by the system is not the agent's own status.
+                    continue
+                when = parse_record_time(obj.get("timestamp"))
 
-                # Codex / generic text fields
-                for key in ("text", "output", "message", "content"):
-                    val = obj.get(key)
-                    if isinstance(val, str) and val:
-                        pieces.append(val)
+                # Claude Code keeps the message under "message"; Codex rollouts
+                # keep it under "payload"; older shapes use "item" or the
+                # top level.
+                holders = [obj]
+                for key in ("message", "payload", "item"):
+                    if isinstance(obj.get(key), dict):
+                        holders.append(obj[key])
 
-                # Nested agent_message style
-                item = obj.get("item") or {}
-                if isinstance(item, dict):
-                    for key in ("text", "content", "message"):
-                        val = item.get(key)
-                        if isinstance(val, str):
-                            pieces.append(val)
+                for holder in holders:
+                    content = holder.get("content")
+                    if isinstance(content, str):
+                        pieces.append((content, when))
+                    elif isinstance(content, list):
+                        for part in content:
+                            if (
+                                isinstance(part, dict)
+                                and part.get("type") in _TEXT_PART_TYPES
+                                and isinstance(part.get("text"), str)
+                            ):
+                                pieces.append((part["text"], when))
+                            elif isinstance(part, str):
+                                pieces.append((part, when))
+                    for key in ("text", "message"):
+                        val = holder.get(key)
+                        if isinstance(val, str) and val:
+                            pieces.append((val, when))
 
-        return "\n".join(pieces)
+        return pieces

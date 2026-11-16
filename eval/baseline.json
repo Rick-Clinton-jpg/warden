@@ -1,0 +1,116 @@
+{
+  "always_match_accuracy": 0.5,
+  "bootstrap": {
+    "resamples": 2000,
+    "seed": 0,
+    "unit": "objective"
+  },
+  "dataset_sha256": "8212e91c39a69051ebe2afec404d19aa6ba73c2fb1b5815c2356622a44fd0d4e",
+  "final_tag_by": "kind",
+  "final_tags": {
+    "off_reversal": {
+      "DIVERGENT": 2,
+      "MATCH": 55,
+      "UNCLEAR": 3
+    },
+    "off_unrelated": {
+      "DIVERGENT": 2,
+      "DRIFT": 58
+    },
+    "on_echo": {
+      "DIVERGENT": 6,
+      "MATCH": 53,
+      "UNCLEAR": 1
+    },
+    "on_para": {
+      "DIVERGENT": 3,
+      "DRIFT": 57
+    }
+  },
+  "n": 240,
+  "n_clusters": 20,
+  "n_off_task": 120,
+  "n_on_task": 120,
+  "pearson_word_trigram": 0.9515,
+  "raters": {
+    "trigram": {
+      "auc": 0.4993,
+      "auc_ci95": [
+        0.4713,
+        0.5263
+      ],
+      "best_threshold": 0.8222,
+      "best_threshold_accuracy": 0.5708,
+      "by_kind": {
+        "on_echo vs off_reversal": {
+          "auc": 0.5999,
+          "auc_ci95": [
+            0.5317,
+            0.6696
+          ]
+        },
+        "on_echo vs off_unrelated": {
+          "auc": 1.0,
+          "auc_ci95": [
+            1.0,
+            1.0
+          ]
+        },
+        "on_para vs off_reversal": {
+          "auc": 0.0,
+          "auc_ci95": [
+            0.0,
+            0.0
+          ]
+        },
+        "on_para vs off_unrelated": {
+          "auc": 0.3972,
+          "auc_ci95": [
+            0.3022,
+            0.4874
+          ]
+        }
+      }
+    },
+    "word": {
+      "auc": 0.529,
+      "auc_ci95": [
+        0.5057,
+        0.552
+      ],
+      "best_threshold": 0.5556,
+      "best_threshold_accuracy": 0.55,
+      "by_kind": {
+        "on_echo vs off_reversal": {
+          "auc": 0.5994,
+          "auc_ci95": [
+            0.5086,
+            0.6861
+          ]
+        },
+        "on_echo vs off_unrelated": {
+          "auc": 1.0,
+          "auc_ci95": [
+            1.0,
+            1.0
+          ]
+        },
+        "on_para vs off_reversal": {
+          "auc": 0.0,
+          "auc_ci95": [
+            0.0,
+            0.0
+          ]
+        },
+        "on_para vs off_unrelated": {
+          "auc": 0.5164,
+          "auc_ci95": [
+            0.4833,
+            0.55
+          ]
+        }
+      }
+    }
+  },
+  "split": null
+}

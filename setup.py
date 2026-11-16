@@ -6,7 +6,7 @@ long_description = (Path(__file__).parent / "README.md").read_text(encoding="utf
 
 setup(
     name="warden-agent",
-    version="0.1.1",
+    version="0.2.0",
     description="Lightweight Agent Drift Detection & Audit System",
     long_description=long_description,
     long_description_content_type="text/markdown",

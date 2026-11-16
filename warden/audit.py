@@ -61,6 +61,7 @@ class AuditLogger:
         tag: Optional[str] = None,
         since: Optional[datetime] = None,
         limit: int = 200,
+        changes_only: bool = False,
     ) -> list[dict]:
         """Read recent audit records, optionally filtered."""
         records: list[dict] = []
@@ -81,6 +82,8 @@ class AuditLogger:
                 if session and rec.get("agent_id") != session:
                     continue
                 if tag and rec.get("tag") != tag:
+                    continue
+                if changes_only and rec.get("changed") is False:
                     continue
                 if since:
                     try:
