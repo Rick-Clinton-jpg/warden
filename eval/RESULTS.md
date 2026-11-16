@@ -143,3 +143,101 @@ Hand check: recall = (8 + 12 + 12 + 12 + 0) / 60 = 44 / 60 = 0.733.
 
 Same limits as before: the set was written by the same AI author, who knew
 the check's rules; labels follow from the class; 12 objectives is few.
+
+---
+
+## 7. Real agent sessions: Earshot D2, Codex arm (16 November 2026)
+
+Data: 288 real Codex CLI receiver sessions on 12 tasks, from
+github.com/Rick-Clinton-jpg/Earshot at commit `930f125` (trace-set
+SHA-256 `296a0352…39fe81`). Labels come from that study's sealed design:
+72 honest sessions (on-task), 108 coalition and 108 conceal sessions that
+were instructed to favour a hidden pair of files (off-task). Plan: `PLAN.md`,
+Plan 3, committed before scoring. Reproduce with
+`python eval/real_earshot_d2.py --earshot <path>`.
+
+This is the first result here that does not rest on AI-written statuses or
+labels. Intervals resample the 12 tasks and run narrow.
+
+### 7.1 The deviation is real and shows in the outcome
+
+| Condition | n | Mean minutes on the true target (of 60) |
+|---|---|---|
+| honest | 72 | 46.3 |
+| coalition | 108 | 24.7 |
+| conceal | 108 | 22.9 |
+
+### 7.2 Tags: unusable on real sessions
+
+| Status used | Condition | MATCH | UNCLEAR | DIVERGENT | DRIFT |
+|---|---|---|---|---|---|
+| A: opening sentence | honest | 3 | 51 | 18 | 0 |
+| | coalition | 3 | 67 | 38 | 0 |
+| | conceal | 3 | 64 | 41 | 0 |
+| B: final account | honest | 0 | 15 | 55 | 2 |
+| | coalition | 0 | 24 | 84 | 0 |
+| | conceal | 0 | 24 | 83 | 1 |
+
+Real honest work is tagged `MATCH` in 3 of 72 sessions on its opening
+sentence (Wilson 95% CI 1% – 12%) and 0 of 72 on its final account
+(0% – 5%). Off-task sessions get the same spread of tags. At the shipped
+thresholds the tag carries no information on this data.
+
+### 7.3 Scores: one result against expectation
+
+AUC, higher score = on-task, honest vs both off-task conditions:
+
+| Status used | Rater A (word) | Rater B (trigram) |
+|---|---|---|
+| A: opening sentence | **0.769** (0.691 – 0.842) | 0.697 (0.615 – 0.765) |
+| B: final account | 0.438 (0.348 – 0.508) | 0.474 (0.396 – 0.539) |
+
+Against conceal sessions alone, status A: 0.788 (0.702 – 0.863) for Rater A.
+
+- **The plan's expectation was wrong for status A.** The opening sentence
+  does separate honest from off-task sessions, including the ones told to
+  conceal. Honest agents restate the request more closely (6.4 shared
+  keywords on average against 5.1 and 5.0); off-task agents spend words on
+  their other aim ("using the supplied convention", "extra time for C and D").
+- It is not a length effect: status length alone gives 0.376 (0.322 – 0.432),
+  and the count of shared keywords alone gives 0.790 (0.718 – 0.852).
+  These two checks were run after seeing the result and are exploratory.
+- **The expectation held for status B.** The final account does not
+  separate them; both intervals reach or include 0.5.
+- **Caveat.** The honest and off-task conditions had differently worded
+  instructions, so some of the status-A difference may come from the
+  agents echoing their instructions, not from being on or off task. One
+  study, one model, 12 tasks.
+
+### 7.4 What the agents did: no signal in file access
+
+| Condition | Opened the target file | Opened all four candidate files |
+|---|---|---|
+| honest | 72 / 72 | 72 / 72 |
+| coalition | 108 / 108 | 108 / 108 |
+| conceal | 108 / 108 | 107 / 108 |
+
+Every session read the right file. An observer that records which files an
+agent opened would see no difference between an honest session and one
+acting on a hidden instruction. The difference is only in the decision the
+agent returned (7.1).
+
+### 7.5 Self-report under an instruction to conceal
+
+The final account mentions the hidden convention in 37 of 108 coalition
+sessions (34%, Wilson 26% – 44%) and 0 of 108 conceal sessions (0% – 3%),
+while conceal sessions deviated as much (7.1). The reversal check flagged
+0, 1 and 2 final accounts (honest, coalition, conceal) and no opening
+sentences: these are not reversals and it does not see them.
+
+### 7.6 Reading
+
+1. On real sessions WARDEN's tags are noise; its raw score on the opening
+   sentence has modest signal that the thresholds throw away.
+2. Watching file access would not have caught this deviation.
+3. An agent told to conceal leaves nothing in its own account. Only an
+   external check on the result separated the conditions.
+
+Hand check (7.3): AUC is the share of (honest, off-task) session pairs in
+which the honest session scores higher, ties counting half; 72 x 216 =
+15,552 pairs for the pooled figures.

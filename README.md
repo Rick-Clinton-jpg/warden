@@ -2,7 +2,7 @@
 
 **Lightweight Agent Drift Detection & Audit System**
 
-Version 0.3.0
+Version 0.3.1
 
 > **ON HOLD — prototype stage, not production-ready.** Core detector found to have a fundamental scoring flaw; see [Known Issues / Limitations](#known-issues--limitations) below.
 
@@ -55,6 +55,25 @@ IntentGraph API wrapper" scores MATCH (0.78), while "Wiring up FastAPI
 routers and Pydantic response models for the two handlers" scores DRIFT
 (0.06).
 
+**On real agent sessions the tags are noise.** WARDEN was run on 288 real
+Codex sessions from the [Earshot](https://github.com/Rick-Clinton-jpg/Earshot)
+D2 study, where 72 receivers did the stated task and 216 were instructed to
+favour a hidden pair of files (and half of those to conceal it). Honest
+sessions put 46 of 60 review minutes on the true target; the others put 23
+to 25. WARDEN tagged honest work `MATCH` in 3 of 72 sessions on its opening
+sentence and 0 of 72 on its final account, and gave off-task sessions the
+same spread of tags. The raw word score on the opening sentence does
+separate the groups (AUC 0.77, interval 0.69 – 0.84), but the thresholds
+discard it, and the instructions differed in wording between groups, so
+that figure needs replication. The final account does not separate them
+(AUC 0.44). See [`eval/RESULTS.md`](./eval/RESULTS.md), section 7.
+
+**Watching which files the agent opens would not help here either.** In
+those sessions every agent, honest or not, opened the correct file. The
+deviation showed only in the decision it returned. And of the 108 agents
+told to conceal the hidden instruction, none mentioned it in their own
+account. Only an external check on the result told the groups apart.
+
 **No dependency-free replacement was found.** Two candidate scorers were
 developed on half the objectives and scored once on the other half. The
 better one reaches a pooled AUC of 0.797 by penalising undo wording, but
@@ -85,9 +104,10 @@ old is now tagged `STALE` and not scored (see
 [Status Freshness](#status-freshness-stale)), but a session that never
 emits one produces only `UNCLEAR`.
 
-**The evaluation set is designed, not sampled.** It was written by an AI
+**The synthetic evaluation sets are designed, not sampled.** They were written by an AI
 assistant to a fixed design, with labels that follow from the design; no
-human labelled it, and it is not a sample of real agent traffic. See
+human labelled them. The real-session test above is the only result here
+that does not depend on them. See
 [`eval/DATASET.md`](./eval/DATASET.md).
 
 **Related work.** The same failure is documented for embedding-cosine
@@ -135,6 +155,12 @@ The matcher is unchanged. Everything else below is fixed.
 - **Terminal safety.** Control characters are stripped from status text.
 - **Audit trail.** Each record says whether it differs from the previous
   poll; `warden audit --changes-only` hides the repeats.
+
+## Changes in 0.3.1 (November 2026)
+
+- **First test on real sessions.** `eval/real_earshot_d2.py` runs WARDEN's
+  scorers on 288 real Codex sessions from the Earshot D2 study, with labels
+  from that study's sealed design. No product code changed.
 
 ## Changes in 0.3.0 (November 2026)
 
@@ -381,7 +407,7 @@ Audit records are newline-delimited JSON:
 
 ## Status
 
-- Design: prototype (v0.3.0) — on hold; core detector unchanged and not trustworthy, see [Known Issues / Limitations](#known-issues--limitations)
+- Design: prototype (v0.3.1) — on hold; core detector unchanged and not trustworthy, see [Known Issues / Limitations](#known-issues--limitations)
 - Implementation: working CLI + multi-session daemon + Claude Code / Codex file watchers + audit trail; dual-rater matcher runs, but its scoring is not trustworthy (see Known Issues)
 - Tests: matcher, audit, polling, freshness, registry, daemon and the evaluation harness. The scoring flaw itself is pinned by strict expected-failure tests and a frozen baseline, so it cannot change unnoticed
 
