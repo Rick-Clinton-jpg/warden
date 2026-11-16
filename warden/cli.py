@@ -10,6 +10,7 @@ import click
 
 from . import __version__
 from .core import Warden
+from .freshness import DEFAULT_STALE_AFTER_SECONDS
 
 
 def _parse_since(value: str) -> datetime:
@@ -78,6 +79,9 @@ def cli(ctx: click.Context, root: str) -> None:
 @click.option("--objective", required=True, help="Stated objective for this session")
 @click.option("--interval", default=600, show_default=True, help="Poll interval in seconds")
 @click.option("--transcript", default=None, help="Explicit path to session transcript / log")
+@click.option("--stale-after", "stale_after", default=DEFAULT_STALE_AFTER_SECONDS,
+              show_default=True,
+              help="Seconds after which a status is tagged STALE and not scored")
 @click.option("--once", is_flag=True, help="Register, run a single check, and exit")
 @click.option("--follow", is_flag=True,
               help="Register, then block and poll this session on --interval until Ctrl-C")
@@ -91,6 +95,7 @@ def watch_cmd(
     objective: str,
     interval: int,
     transcript: str | None,
+    stale_after: int,
     once: bool,
     follow: bool,
     background: bool,
@@ -108,11 +113,13 @@ def watch_cmd(
         agent_type=agent_type,
         interval_seconds=interval,
         transcript_path=transcript,
+        stale_after_seconds=stale_after,
     )
     click.echo(f"[warden] Registered session '{session.agent_id}'")
     click.echo(f"         objective : {session.objective}")
     click.echo(f"         strategy  : {session.strategy_name}")
     click.echo(f"         interval  : {session.interval_seconds}s")
+    click.echo(f"         stale after: {session.stale_after_seconds}s")
 
     if once:
         result = w.check_once(session_id)
@@ -179,6 +186,14 @@ def status_cmd(ctx: click.Context) -> None:
                 click.echo(
                     f"  last      : {s.last_tag or '?'} @ {s.last_checked}"
                 )
+            if s.last_freshness and s.last_status:
+                if s.last_status_age_seconds is not None:
+                    click.echo(
+                        f"  freshness : {s.last_freshness} "
+                        f"(status {int(s.last_status_age_seconds)}s old at last check)"
+                    )
+                else:
+                    click.echo(f"  freshness : {s.last_freshness}")
             if s.last_status:
                 click.echo(f"  status    : {s.last_status[:70]}")
         click.echo("")
@@ -226,7 +241,7 @@ def audit_cmd(
 @click.option("--today", is_flag=True, help="Only today's records")
 @click.option("--session", default=None)
 @click.option("--tag", "tag", default="DRIFT", show_default=True,
-              help="Tag to filter by (DRIFT, DIVERGENT, UNCLEAR, MATCH)")
+              help="Tag to filter by (DRIFT, DIVERGENT, UNCLEAR, MATCH, STALE)")
 @click.option("--limit", default=50, show_default=True)
 @click.pass_context
 def drifts_cmd(
@@ -276,6 +291,23 @@ def daemon_cmd(ctx: click.Context, tick_seconds: int) -> None:
     """Continuously check every active session on its own --interval, in one process."""
     w: Warden = ctx.obj["warden"]
     w.run_daemon(tick_seconds=tick_seconds)
+
+
+@cli.command("eval")
+@click.argument("pairs_file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+def eval_cmd(pairs_file: str, as_json: bool) -> None:
+    """Score the matcher against a hand-labelled pairs file (JSONL)."""
+    from .evaluation import evaluate_file, format_report
+
+    try:
+        report = evaluate_file(pairs_file)
+    except ValueError as exc:
+        raise click.ClickException(str(exc))
+    if as_json:
+        click.echo(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        click.echo(format_report(report))
 
 
 @cli.command("rule")

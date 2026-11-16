@@ -192,6 +192,52 @@ This is intentionally crude and dependency-free. An embedding upgrade path is do
 
 ---
 
+## Status Freshness (STALE)
+
+Before scoring, WARDEN checks how old the status line is. A status older
+than `--stale-after` (default 1800s — three missed 10-minute emissions) is
+tagged **`STALE`**, logged, and **not scored**.
+
+| Evidence | Result |
+|----------|--------|
+| The transcript record carrying the status has its own timestamp | Age is known → `FRESH` or `STALE` |
+| No record timestamp, but the file's mtime is older than the limit | Status is at least that old → `STALE` |
+| No record timestamp, file recently modified | `UNVERIFIED` — scored, and the audit note says the age could not be verified |
+
+A file's mtime can prove a status is old; it cannot prove one is fresh,
+because an active transcript can still contain an hours-old status line.
+
+```bash
+warden watch --session abc123 --objective "..." --stale-after 900
+warden drifts --tag STALE
+```
+
+Every audit record now carries `freshness`, `status_age_seconds`,
+`status_min_age_seconds`, `status_time`, `freshness_basis` and
+`stale_after_seconds`.
+
+---
+
+## Reproducing the Matcher Evaluation
+
+```bash
+warden eval eval/labelled_pairs.jsonl
+warden eval eval/labelled_pairs.jsonl --json > eval/baseline.json
+```
+
+`warden eval` scores both raters against a hand-labelled JSONL file and
+reports AUC with a 95% bootstrap interval (fixed seed), the best accuracy
+at any threshold against the always-MATCH baseline, the Pearson correlation
+between the two raters, and the final tag by human label. The report
+includes the SHA-256 of the data file. See [eval/README.md](./eval/README.md)
+for the file format.
+
+`tests/test_known_flaw.py` pins the disclosed scoring flaw as strict
+expected-failures: CI stays green while the flaw exists and goes red the
+moment it is fixed, until the marker and this README are updated.
+
+---
+
 ## Data Layout
 
 ```

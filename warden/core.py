@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from .audit import AuditLogger
+from .freshness import DEFAULT_STALE_AFTER_SECONDS, STALE, assess, format_age
 from .matcher import dual_compare
 from .polling import get_strategy, PollingStrategy
 
@@ -34,6 +35,14 @@ def format_result_line(result: dict, *, agent_id: Optional[str] = None) -> str:
             f"{prefix}{tag:9} | word={word_tag} trigram={trigram_tag} | "
             f"{status[:80]}"
         )
+    if tag == "STALE":
+        age = result.get("status_age_seconds")
+        if age is None:
+            age = result.get("status_min_age_seconds")
+            age_text = f"at least {format_age(age)} old" if age is not None else "old"
+        else:
+            age_text = f"{format_age(age)} old"
+        return f"{prefix}{tag:9} | {age_text}, not scored | {status[:80]}"
     return f"{prefix}{tag:9} | {status[:80]}"
 
 
@@ -54,6 +63,10 @@ class Session:
     last_word_tag: Optional[str] = None
     last_trigram_tag: Optional[str] = None
     active: bool = True
+    # A status older than this is tagged STALE and not scored.
+    stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS
+    last_freshness: Optional[str] = None
+    last_status_age_seconds: Optional[float] = None
 
 
 class Warden:
@@ -102,6 +115,7 @@ class Warden:
         agent_type: str = "claude-code",
         interval_seconds: int = 600,
         transcript_path: Optional[str] = None,
+        stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
     ) -> Session:
         """Register a session for monitoring."""
         session = Session(
@@ -112,6 +126,7 @@ class Warden:
             strategy_name=agent_type,
             transcript_path=transcript_path,
             active=True,
+            stale_after_seconds=stale_after_seconds,
         )
         self._sessions[agent_id] = session
         self._objective_path(agent_id).write_text(objective.strip() + "\n", encoding="utf-8")
@@ -149,40 +164,88 @@ class Warden:
             return {"error": f"Unknown session: {agent_id}"}
 
         strategy = self._get_strategy(session)
-        status = strategy.poll(session.agent_id)
+        reading = strategy.read(session.agent_id)
+        status = reading.text if reading else None
 
-        result = dual_compare(status or "", session.objective)
+        now = datetime.now().astimezone()
+        fresh = assess(reading, now, session.stale_after_seconds)
+        freshness_extra = {
+            "freshness": fresh.state,
+            "status_age_seconds": (
+                round(fresh.age_seconds, 1) if fresh.age_seconds is not None else None
+            ),
+            "status_min_age_seconds": (
+                round(fresh.min_age_seconds, 1)
+                if fresh.min_age_seconds is not None else None
+            ),
+            "status_time": (
+                reading.observed_at.isoformat(timespec="seconds")
+                if reading and reading.observed_at else None
+            ),
+            "freshness_basis": fresh.basis,
+            "stale_after_seconds": session.stale_after_seconds,
+        }
+
+        if status and fresh.state == STALE:
+            # A stale status says nothing about what the agent is doing now.
+            # Record it; do not score it.
+            if fresh.age_seconds is not None:
+                age_text = f"{format_age(fresh.age_seconds)} old"
+            else:
+                age_text = f"at least {format_age(fresh.min_age_seconds or 0)} old"
+            final_tag = "STALE"
+            word_tag = trigram_tag = None
+            note = (
+                f"Last WARDEN_STATUS is {age_text} "
+                f"(limit {format_age(session.stale_after_seconds)}, "
+                f"basis: {fresh.basis}). Not scored."
+            )
+            extra = dict(freshness_extra)
+        else:
+            result = dual_compare(status or "", session.objective)
+            final_tag = result.final_tag
+            word_tag, trigram_tag = result.word_tag, result.trigram_tag
+            note = result.note
+            if status and fresh.state != "FRESH":
+                note += " Status age could not be verified."
+            extra = {
+                "word_tag": result.word_tag,
+                "word_score": round(result.word_score, 3),
+                "trigram_tag": result.trigram_tag,
+                "trigram_score": round(result.trigram_score, 3),
+                **freshness_extra,
+            }
 
         self.audit.log(
             agent_id=session.agent_id,
             objective=session.objective,
             status=status or "",
-            tag=result.final_tag,
-            note=result.note,
-            extra={
-                "word_tag": result.word_tag,
-                "word_score": round(result.word_score, 3),
-                "trigram_tag": result.trigram_tag,
-                "trigram_score": round(result.trigram_score, 3),
-            },
+            tag=final_tag,
+            note=note,
+            extra=extra,
         )
 
-        session.last_checked = datetime.now().astimezone().isoformat(timespec="seconds")
+        session.last_checked = now.isoformat(timespec="seconds")
         session.last_status = status
-        session.last_tag = result.final_tag
-        session.last_word_tag = result.word_tag
-        session.last_trigram_tag = result.trigram_tag
+        session.last_tag = final_tag
+        session.last_word_tag = word_tag
+        session.last_trigram_tag = trigram_tag
+        session.last_freshness = fresh.state
+        session.last_status_age_seconds = freshness_extra["status_age_seconds"]
         self._save_registry()
 
         return {
             "agent_id": session.agent_id,
             "objective": session.objective,
             "status": status,
-            "tag": result.final_tag,
-            "word_tag": result.word_tag,
-            "trigram_tag": result.trigram_tag,
-            "note": result.note,
+            "tag": final_tag,
+            "word_tag": word_tag,
+            "trigram_tag": trigram_tag,
+            "note": note,
             "timestamp": session.last_checked,
+            "freshness": fresh.state,
+            "status_age_seconds": freshness_extra["status_age_seconds"],
+            "status_min_age_seconds": freshness_extra["status_min_age_seconds"],
         }
 
     def check_all(self) -> list[dict]:

@@ -4,10 +4,32 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .base import PollingStrategy
+from .base import PollingStrategy, StatusReading
+
+
+def parse_record_time(value: object) -> Optional[datetime]:
+    """Parse a transcript record's ISO-8601 timestamp into an aware datetime.
+
+    Returns None for anything that is not an unambiguous point in time
+    (missing, malformed, or without a UTC offset) -- a guessed timezone
+    would make a stale status look fresh or the reverse.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
 
 
 def _expand(path: str | Path) -> Path:
@@ -52,20 +74,37 @@ class FileWatcherStrategy(PollingStrategy):
         self.max_tail_lines = max_tail_lines
 
     def poll(self, session_id: str) -> Optional[str]:
+        reading = self.read(session_id)
+        return reading.text if reading else None
+
+    def read(self, session_id: str) -> Optional[StatusReading]:
         path = self._resolve_transcript(session_id)
         if path is None or not path.exists():
             return None
 
         try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
             text = self._read_tail(path)
         except OSError:
             return None
 
-        # JSONL transcripts: extract text content from messages
+        # JSONL transcripts: keep each record's own timestamp with its text
         if path.suffix == ".jsonl":
-            text = self._extract_text_from_jsonl(text)
+            pieces = self._extract_pieces_from_jsonl(text)
+        else:
+            pieces = [(text, None)]
 
-        return self.extract_status(text)
+        latest: Optional[StatusReading] = None
+        for piece_text, record_time in pieces:
+            status = self.extract_status(piece_text)
+            if status:
+                latest = StatusReading(
+                    text=status,
+                    observed_at=record_time,
+                    latest_possible_at=mtime,
+                    time_source="record-timestamp" if record_time else "file-mtime",
+                )
+        return latest
 
     def _resolve_transcript(self, session_id: str) -> Optional[Path]:
         if self.transcript_path is not None:
@@ -151,7 +190,17 @@ class FileWatcherStrategy(PollingStrategy):
         Pull human-readable text out of Claude/Codex JSONL transcripts
         so that WARDEN_STATUS lines embedded in assistant messages are visible.
         """
-        pieces: list[str] = []
+        return "\n".join(text for text, _ in self._extract_pieces_from_jsonl(raw))
+
+    def _extract_pieces_from_jsonl(
+        self, raw: str
+    ) -> list[tuple[str, Optional[datetime]]]:
+        """
+        Same extraction as _extract_text_from_jsonl, but each piece of text
+        keeps the timestamp of the JSONL record it came from (None when the
+        record has no usable top-level "timestamp").
+        """
+        pieces: list[tuple[str, Optional[datetime]]] = []
         for line in raw.splitlines():
             line = line.strip()
             if not line:
@@ -160,27 +209,32 @@ class FileWatcherStrategy(PollingStrategy):
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 # Plain text line — keep it
-                pieces.append(line)
+                pieces.append((line, None))
                 continue
 
             # Common shapes
             if isinstance(obj, dict):
+                when = parse_record_time(obj.get("timestamp"))
+
                 # Claude-style message content
-                content = obj.get("content") or obj.get("message", {}).get("content")
+                message = obj.get("message")
+                content = obj.get("content") or (
+                    message.get("content") if isinstance(message, dict) else None
+                )
                 if isinstance(content, str):
-                    pieces.append(content)
+                    pieces.append((content, when))
                 elif isinstance(content, list):
                     for part in content:
                         if isinstance(part, dict) and part.get("type") == "text":
-                            pieces.append(part.get("text", ""))
+                            pieces.append((part.get("text", ""), when))
                         elif isinstance(part, str):
-                            pieces.append(part)
+                            pieces.append((part, when))
 
                 # Codex / generic text fields
                 for key in ("text", "output", "message", "content"):
                     val = obj.get(key)
                     if isinstance(val, str) and val:
-                        pieces.append(val)
+                        pieces.append((val, when))
 
                 # Nested agent_message style
                 item = obj.get("item") or {}
@@ -188,6 +242,6 @@ class FileWatcherStrategy(PollingStrategy):
                     for key in ("text", "content", "message"):
                         val = item.get(key)
                         if isinstance(val, str):
-                            pieces.append(val)
+                            pieces.append((val, when))
 
-        return "\n".join(pieces)
+        return pieces
